@@ -1,48 +1,22 @@
-import re
+import json
+import os
 from dataclasses import dataclass
 
-INTENTS = {
-    "add": [
-        r"\badd\b", r"\bbuy\b", r"\bneed\b",
-        r"\bcomprar?\b", r"\badiciona\b", r"\bagrega\b", r"\bponle\b",
-        r"\bnecesito\b", r"\bañade\b",
-    ],
-    "remove": [
-        r"\bremove\b", r"\bdone\b", r"\bbought\b", r"\bdelete\b",
-        r"\bquita\b", r"\blisto\b", r"\bya compr[eé]\b", r"\belimina\b", r"\btacha\b",
-    ],
-    "show": [
-        r"\bshow\b", r"\blist\b", r"\bwhat'?s on\b",
-        r"\bqu[eé] hay\b", r"\bmu[eé]strame\b", r"\bqu[eé] falta\b",
-        r"\bver lista\b", r"\bver\b",
-    ],
-    "clear": [
-        r"\bclear\b", r"\bclear all\b",
-        r"\blimpia\b", r"\bborra todo\b", r"\bvaciar\b",
-    ],
-}
+from google import genai
 
-# Words to strip when extracting item names
-NOISE_WORDS = {
-    "add", "buy", "need", "please", "the", "some", "to", "my", "list", "of",
-    "comprar", "adiciona", "agrega", "ponle", "necesito", "añade",
-    "porfa", "por", "favor", "un", "una", "unos", "unas", "la", "el", "los", "las",
-    "a", "de", "para", "del", "al", "lista", "cosas",
-}
+SYSTEM_PROMPT = """\
+You are a grocery list assistant. Parse the user's message and return JSON with:
+- "intent": one of "add", "remove", "show", "clear", or null if unclear
+- "items": list of item names (empty list if not applicable)
+- "list_name": which list they mean — "groceries" (default) or "house"
 
-# Known list aliases → canonical name
-LIST_ALIASES = {
-    "groceries": "groceries",
-    "grocery": "groceries",
-    "supermercado": "groceries",
-    "súper": "groceries",
-    "super": "groceries",
-    "mandado": "groceries",
-    "house": "house",
-    "casa": "house",
-    "home": "house",
-    "hogar": "house",
-}
+Rules:
+- The user may write in English or Spanish
+- Extract clean item names without articles or filler words
+- "casa", "hogar", "home", "house" → list_name "house"
+- "super", "mandado", "grocery" or default → list_name "groceries"
+- Return ONLY valid JSON, no markdown, no explanation
+"""
 
 
 @dataclass
@@ -52,40 +26,35 @@ class ParsedMessage:
     list_name: str
 
 
-def _detect_intent(text: str) -> str | None:
-    lower = text.lower()
-    for intent, patterns in INTENTS.items():
-        for pattern in patterns:
-            if re.search(pattern, lower):
-                return intent
-    return None
+_client: genai.Client | None = None
 
 
-def _detect_list(text: str) -> str:
-    lower = text.lower()
-    for alias, canonical in LIST_ALIASES.items():
-        if alias in lower:
-            return canonical
-    return "groceries"
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    return _client
 
 
-def _extract_items(text: str) -> list[str]:
-    # Remove known noise words and split by commas / "and" / "y"
-    lower = text.lower().strip()
-    # Split on commas, "and", "y"
-    parts = re.split(r",|\band\b|\by\b", lower)
-    items = []
-    for part in parts:
-        words = part.split()
-        cleaned = [w for w in words if w not in NOISE_WORDS]
-        item = " ".join(cleaned).strip(" .,!?¡¿")
-        if item:
-            items.append(item)
-    return items
-
-
-def parse(text: str) -> ParsedMessage:
-    intent = _detect_intent(text)
-    list_name = _detect_list(text)
-    items = _extract_items(text) if intent in ("add", "remove") else []
-    return ParsedMessage(intent=intent, items=items, list_name=list_name)
+async def parse(text: str) -> ParsedMessage:
+    client = _get_client()
+    response = await client.aio.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=text,
+        config=genai.types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0,
+        ),
+    )
+    try:
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+        data = json.loads(raw)
+        return ParsedMessage(
+            intent=data.get("intent"),
+            items=data.get("items", []),
+            list_name=data.get("list_name", "groceries"),
+        )
+    except (json.JSONDecodeError, AttributeError):
+        return ParsedMessage(intent=None, items=[], list_name="groceries")

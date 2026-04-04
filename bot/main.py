@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 from bot.handlers import handle_message, help_command, start
+from bot.storage import init_db
 
 
 def main():
@@ -14,6 +15,7 @@ def main():
         print("Get one from @BotFather on Telegram")
         return
 
+    init_db()
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))

@@ -1,8 +1,13 @@
+import os
+
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from bot.parser import parse
-from bot.storage import add_item, clear_list, get_items, remove_item
+from bot.storage import add_item, allow_chat, clear_list, get_items, is_chat_allowed, remove_item
+
+AUTH_PROMPT = "🔒 Send the password to use this bot.\n🔒 Envía la contraseña para usar este bot."
 
 WELCOME = (
     "🛒 *Grocery Bot*\n\n"
@@ -20,11 +25,18 @@ WELCOME = (
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(WELCOME, parse_mode="Markdown")
+    chat_id = update.effective_chat.id
+    if is_chat_allowed(chat_id):
+        await update.message.reply_text(WELCOME, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(AUTH_PROMPT)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(WELCOME, parse_mode="Markdown")
+    if is_chat_allowed(update.effective_chat.id):
+        await update.message.reply_text(WELCOME, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(AUTH_PROMPT)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -32,8 +44,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
+    chat_id = update.effective_chat.id
+
+    if not is_chat_allowed(chat_id):
+        if text.strip() == os.getenv("BOT_PASSWORD", ""):
+            allow_chat(chat_id)
+            await update.message.reply_text("✅ Authenticated! / ¡Autenticado!\n\n" + WELCOME, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.message.reply_text("❌ Wrong password. / Contraseña incorrecta.")
+        return
+
     user = update.effective_user.first_name or "Someone"
-    result = parse(text)
+    result = await parse(text)
 
     if result.intent == "add":
         if not result.items:
@@ -70,7 +92,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = [f"📋 *{result.list_name}* ({len(items)} items):"]
         for i, item in enumerate(items, 1):
             lines.append(f"  {i}. {item['item_text']}")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
     elif result.intent == "clear":
         count = clear_list(result.list_name)
