@@ -107,4 +107,7 @@ async def run(text: str, user: str = "") -> str:
     if user:
         message = f"[from {user}] {text}"
     result = await agent.ainvoke({"messages": [HumanMessage(content=message)]})
-    return result["messages"][-1].content
+    content = result["messages"][-1].content
+    if isinstance(content, list):
+        return "".join(block["text"] for block in content if block.get("text"))
+    return content

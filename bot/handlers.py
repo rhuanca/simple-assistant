@@ -55,5 +55,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = update.effective_user.first_name or "Someone"
+    await update.effective_chat.send_action("typing")
     reply = await run(text, user=user)
     await update.message.reply_text(reply)
