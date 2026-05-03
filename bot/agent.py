@@ -84,6 +84,13 @@ def clear_list(list_name: str = "groceries") -> str:
     return f"Cleared {count} items from {list_name}."
 
 
+class AgentError(Exception):
+    def __init__(self, user_message: str, admin_detail: str):
+        super().__init__(admin_detail)
+        self.user_message = user_message
+        self.admin_detail = admin_detail
+
+
 _tools = [add_items, remove_items, show_list, clear_list]
 _agent = None
 
@@ -105,7 +112,22 @@ async def run(text: str, user: str = "") -> str:
     message = text
     if user:
         message = f"[from {user}] {text}"
-    result = await agent.ainvoke({"messages": [HumanMessage(content=message)]})
+    try:
+        result = await agent.ainvoke({"messages": [HumanMessage(content=message)]})
+    except Exception as exc:
+        error = str(exc)
+        if "PERMISSION_DENIED" in error or "403" in error:
+            raise AgentError(
+                user_message=(
+                    "I cannot access Gemini right now (permission denied). "
+                    "Please update your Google AI project/API key, then try again."
+                ),
+                admin_detail=f"Gemini permission denied: {error}",
+            ) from exc
+        raise AgentError(
+            user_message="I hit an unexpected model error. Please try again in a moment.",
+            admin_detail=f"Model error: {error}",
+        ) from exc
     content = result["messages"][-1].content
     if isinstance(content, list):
         return "".join(block["text"] for block in content if block.get("text"))
