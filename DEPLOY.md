@@ -19,6 +19,21 @@ A step-by-step guide to running this bot 24/7 on a Raspberry Pi 3, surviving reb
 
 ---
 
+## Quick deploy (script)
+
+Once you've finished Steps 1–3 below (uv installed, code cloned with `.env` filled in, optional `/logs` command added), the rest is automated:
+
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+The script handles Steps 4–6 in one shot: journald size cap, systemd unit, lingering, enable + (re)start. It's idempotent — safe to re-run after every `git pull`. It prompts before each `sudo` step and never reads `.env`.
+
+The full step-by-step below is the manual reference. Read it once to understand what the script does, then use the script for day-to-day deploys.
+
+---
+
 ## Step 1 — Install uv and Python 3.13
 
 uv handles Python installs on ARM, so you don't have to compile from source.
