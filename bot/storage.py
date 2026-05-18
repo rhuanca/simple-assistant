@@ -86,6 +86,25 @@ def remove_item(item_text: str, list_name: str = DEFAULT_LIST) -> bool:
         return cursor.rowcount > 0
 
 
+def get_item_by_id(item_id: int) -> dict | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT id, list_name, item_text, added_by, created_at FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def remove_item_by_id(item_id: int) -> str | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "DELETE FROM items WHERE id = ? RETURNING item_text",
+            (item_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+
 def clear_list(list_name: str = DEFAULT_LIST) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute("DELETE FROM items WHERE list_name = ?", (list_name,))

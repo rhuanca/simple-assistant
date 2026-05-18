@@ -84,7 +84,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = first_name
     await update.effective_chat.send_action("typing")
     try:
-        reply = await run(text, user=user)
+        reply = await run(text, user=user, user_id=user_id)
     except AgentError as exc:
         reply = exc.user_message
         await _notify_admins(context, f"⚠️ Bot error from {first_name} (chat {chat_id}):\n{exc.admin_detail}")
