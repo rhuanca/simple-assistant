@@ -14,7 +14,7 @@ def _mask_secret(value: str) -> str:
 
 
 def main():
-    load_dotenv()
+    load_dotenv(override=True)
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         print("Error: set TELEGRAM_BOT_TOKEN in your .env file")
@@ -24,6 +24,9 @@ def main():
     init_db()
     # print(f"Telegram bot token: {_mask_secret(token)}")
     # print(f"Gemini API key:     {_mask_secret(os.getenv('GEMINI_API_KEY', ''))}")
+    if os.getenv("LANGSMITH_TRACING", "").lower() == "true":
+        project = os.getenv("LANGSMITH_PROJECT", "default")
+        print(f"LangSmith tracing: ENABLED (project: {project})")
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))

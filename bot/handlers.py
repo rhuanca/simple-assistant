@@ -74,13 +74,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Wrong password. / Contraseña incorrecta.")
         return
 
-    upsert_user(
-        telegram_user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        first_name=first_name,
-    )
-
     user = first_name
     await update.effective_chat.send_action("typing")
     try:

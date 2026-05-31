@@ -1,11 +1,14 @@
 import contextvars
 import os
+from typing import Annotated
 
 from cachetools import TTLCache
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langsmith import traceable
+from pydantic import Field
 
 from bot import storage
 
@@ -71,15 +74,16 @@ def _format_view_block(view: dict) -> str:
     return f"[Recently viewed {view['list_name']} list:\n" + "\n".join(lines) + "]"
 
 
-@tool
-def add_items(items: list[str], list_name: str = "groceries", added_by: str = "") -> str:
-    """Add one or more items to a shopping list.
+_LIST_NAME_ARG = Annotated[str, Field(description="Which list — 'groceries' or 'house'.")]
 
-    Args:
-        items: List of item names to add.
-        list_name: Which list — "groceries" or "house".
-        added_by: Name of the user adding items.
-    """
+
+@tool
+def add_items(
+    items: Annotated[list[str], Field(description="Item names to add.")],
+    list_name: _LIST_NAME_ARG = "groceries",
+    added_by: Annotated[str, Field(description="Name of the user adding the items.")] = "",
+) -> str:
+    """Add one or more items to a shopping list."""
     for item in items:
         storage.add_item(item, list_name=list_name, added_by=added_by)
     _refresh_user_cache()
@@ -87,13 +91,11 @@ def add_items(items: list[str], list_name: str = "groceries", added_by: str = ""
 
 
 @tool
-def remove_items(items: list[str], list_name: str = "groceries") -> str:
-    """Remove one or more items from a shopping list.
-
-    Args:
-        items: List of item names to remove.
-        list_name: Which list — "groceries" or "house".
-    """
+def remove_items(
+    items: Annotated[list[str], Field(description="Item names to remove (use only when no [Recently viewed list] block is available).")],
+    list_name: _LIST_NAME_ARG = "groceries",
+) -> str:
+    """Remove one or more items from a shopping list by name."""
     removed = []
     not_found = []
     for item in items:
@@ -111,17 +113,16 @@ def remove_items(items: list[str], list_name: str = "groceries") -> str:
 
 
 @tool
-def remove_items_by_id(ids: list[int], texts: list[str]) -> str:
+def remove_items_by_id(
+    ids: Annotated[list[int], Field(description="Database ids from the [Recently viewed list] block.")],
+    texts: Annotated[list[str], Field(description="Texts matching `ids` 1-to-1, for verification.")],
+) -> str:
     """Remove items by database id. Use this whenever the [Recently viewed list]
     block contains the items the user is referring to.
 
     Pass parallel lists from the block. Each row's current text is verified
     against `texts` before deleting; mismatches are reported as stale (call
     show_list and retry with fresh ids).
-
-    Args:
-        ids: Database ids from the [Recently viewed list] block.
-        texts: Texts matching `ids` 1-to-1, for verification.
     """
     removed, not_found, stale = [], [], []
 
@@ -148,12 +149,8 @@ def remove_items_by_id(ids: list[int], texts: list[str]) -> str:
 
 
 @tool
-def show_list(list_name: str = "groceries") -> str:
-    """Show all items currently on a shopping list.
-
-    Args:
-        list_name: Which list — "groceries" or "house".
-    """
+def show_list(list_name: _LIST_NAME_ARG = "groceries") -> str:
+    """Show all items currently on a shopping list."""
     items = storage.get_items(list_name)
     user_id = _current_user_id.get()
     if user_id is not None:
@@ -167,12 +164,8 @@ def show_list(list_name: str = "groceries") -> str:
 
 
 @tool
-def clear_list(list_name: str = "groceries") -> str:
-    """Clear all items from a shopping list.
-
-    Args:
-        list_name: Which list — "groceries" or "house".
-    """
+def clear_list(list_name: _LIST_NAME_ARG = "groceries") -> str:
+    """Clear all items from a shopping list."""
     count = storage.clear_list(list_name)
     _refresh_user_cache()
     return f"Cleared {count} items from {list_name}."
@@ -201,9 +194,8 @@ def _get_agent():
     return _agent
 
 
-async def run(text: str, user: str = "", user_id: int | None = None) -> str:
-    agent = _get_agent()
-
+@traceable(run_type="prompt", name="build_prompt")
+def _build_prompt(text: str, user: str, user_id: int | None) -> str:
     parts = []
     if user_id is not None:
         view = _get_cached_view(user_id)
@@ -212,7 +204,23 @@ async def run(text: str, user: str = "", user_id: int | None = None) -> str:
     if user:
         parts.append(f"[from {user}]")
     parts.append(text)
-    message = "\n".join(parts)
+    return "\n".join(parts)
+
+
+@traceable(name="extract_response")
+def _extract_text(result: dict) -> str:
+    content = result["messages"][-1].content
+    if isinstance(content, list):
+        text = "".join(block["text"] for block in content if block.get("text"))
+    else:
+        text = content or ""
+    return text.strip() or "OK"
+
+
+@traceable(name="grocery_bot.run", tags=["telegram"])
+async def run(text: str, user: str = "", user_id: int | None = None) -> str:
+    agent = _get_agent()
+    message = _build_prompt(text, user, user_id)
 
     token = _current_user_id.set(user_id)
     try:
@@ -235,7 +243,4 @@ async def run(text: str, user: str = "", user_id: int | None = None) -> str:
     finally:
         _current_user_id.reset(token)
 
-    content = result["messages"][-1].content
-    if isinstance(content, list):
-        return "".join(block["text"] for block in content if block.get("text"))
-    return content
+    return _extract_text(result)

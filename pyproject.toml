@@ -6,9 +6,12 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "cachetools>=5.5.0",
+    "google-genai>=1.70.0",
     "langchain>=1.0.0",
     "langchain-google-genai>=2.1.0",
+    "langchain-openai>=1.2.2",
     "langgraph>=1.0.0",
+    "langsmith>=0.7.25",
     "python-dotenv>=1.2.2",
     "python-telegram-bot>=22.7",
 ]
