@@ -83,6 +83,12 @@ def _get_cached_view(user_id: int) -> dict | None:
     return _view_cache.get(user_id)
 
 
+def clear_view_cache() -> None:
+    """Drop every cached list view. Needed when the database is rebuilt underneath us, so
+    no one can reference ids that belonged to the old data."""
+    _view_cache.clear()
+
+
 def _refresh_user_cache() -> None:
     user_id = _current_user_id.get()
     if user_id is None:

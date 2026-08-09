@@ -79,6 +79,58 @@ class ItemByIdOwnershipTests(StorageTestCase):
         self.assertEqual(storage.get_item_by_id(self.common, None)["item_text"], "soap")
 
 
+class RecreateDbTests(StorageTestCase):
+    def setUp(self):
+        super().setUp()
+        storage.add_item("milk", owner_user_id=1)
+        storage.add_item("soap", owner_user_id=None)
+        storage.allow_chat(10)
+        storage.allow_chat(20)
+        storage.upsert_user(telegram_user_id=1, chat_id=10, first_name="Renan")
+        storage.upsert_user(telegram_user_id=2, chat_id=20, first_name="Other")
+        storage.promote_to_admin(1)
+        storage.set_setting("alert_interval_days", "9")
+
+    ADMIN = {"telegram_user_id": 1, "chat_id": 10, "username": "renan", "first_name": "Renan"}
+
+    def test_wipes_items_users_and_settings(self):
+        storage.recreate_db(keep_admin=self.ADMIN)
+
+        self.assertEqual(storage.get_items(1), [])
+        self.assertEqual(storage.get_items(None), [])
+        self.assertEqual(storage.get_setting("alert_interval_days"), "3")  # back to default
+        self.assertEqual([u["telegram_user_id"] for u in storage.get_all_users()], [1])
+
+    def test_keeps_the_running_admin_authorized(self):
+        storage.recreate_db(keep_admin=self.ADMIN)
+
+        self.assertTrue(storage.is_chat_allowed(10))
+        self.assertTrue(storage.is_admin(1))
+
+    def test_everyone_else_must_reauthenticate(self):
+        storage.recreate_db(keep_admin=self.ADMIN)
+
+        self.assertFalse(storage.is_chat_allowed(20))
+        self.assertFalse(storage.is_admin(2))
+
+    def test_backs_the_old_database_up(self):
+        backup = storage.recreate_db(keep_admin=self.ADMIN)
+
+        self.assertIsNotNone(backup)
+        self.assertTrue(backup.exists())
+        self.assertNotEqual(backup, storage.DB_PATH)
+
+    def test_without_keep_admin_nobody_is_authorized(self):
+        storage.recreate_db()
+
+        self.assertFalse(storage.has_any_users())
+        self.assertFalse(storage.is_chat_allowed(10))
+
+    def test_no_backup_when_there_was_no_database(self):
+        storage.DB_PATH.unlink()
+        self.assertIsNone(storage.recreate_db())
+
+
 class SettingsTests(StorageTestCase):
     def test_defaults_returned_when_unset(self):
         self.assertEqual(storage.get_setting("alert_enabled"), "true")

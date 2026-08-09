@@ -4,11 +4,12 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from bot.agent import AgentError, run
+from bot.agent import AgentError, clear_view_cache, run
 from bot.storage import (
     ADMIN_USER_ROLE,
     DEFAULT_USER_ROLE,
     allow_chat,
+    recreate_db,
     find_user_by_username,
     get_admin_chat_ids,
     get_all_users,
@@ -179,6 +180,42 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     revoke_user(user["telegram_user_id"])
     await update.message.reply_text(
         f"🚫 Access revoked for {_user_label(user)}. / Acceso revocado."
+    )
+
+
+RESET_CONFIRM = "CONFIRM"
+
+RESET_WARNING = (
+    "⚠️ */resetdb* deletes every list, every user and all settings, and builds an empty "
+    "database.\n\n"
+    "The current database is kept as a timestamped backup file next to it, but the bot will "
+    "not read it again. Everyone except you will have to send the password again.\n\n"
+    f"Send `/resetdb {RESET_CONFIRM}` to go ahead."
+)
+
+
+async def resetdb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard_admin(update):
+        return
+
+    if not context.args or context.args[0].upper() != RESET_CONFIRM:
+        await update.message.reply_text(RESET_WARNING, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    user_obj = update.effective_user
+    backup = recreate_db(
+        keep_admin={
+            "telegram_user_id": user_obj.id,
+            "chat_id": update.effective_chat.id,
+            "username": user_obj.username or "",
+            "first_name": user_obj.first_name or "Someone",
+        }
+    )
+    clear_view_cache()
+
+    kept = "Previous database saved as " + backup.name if backup else "There was no database to back up"
+    await update.message.reply_text(
+        f"♻️ Database recreated. You are still an admin.\n{kept}."
     )
 
 

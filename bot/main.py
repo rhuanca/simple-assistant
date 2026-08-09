@@ -11,6 +11,7 @@ from bot.handlers import (
     handle_message,
     help_command,
     promote_command,
+    resetdb_command,
     revoke_command,
     start,
     users_command,
@@ -46,6 +47,7 @@ def main():
     app.add_handler(CommandHandler("demote", demote_command))
     app.add_handler(CommandHandler("revoke", revoke_command))
     app.add_handler(CommandHandler("alert", alert_command))
+    app.add_handler(CommandHandler("resetdb", resetdb_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Daily tick that self-checks whether the alert interval has elapsed (see bot/alerts.py).

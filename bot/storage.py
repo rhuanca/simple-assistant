@@ -272,6 +272,34 @@ def revoke_user(telegram_user_id: int) -> bool:
         return True
 
 
+def recreate_db(keep_admin: dict | None = None) -> Path | None:
+    """Move the database aside and build an empty one from the migrations.
+
+    `keep_admin` (telegram_user_id, chat_id, username, first_name) is re-authorized and
+    re-promoted afterwards, so whoever runs this does not lock themselves out. Everyone
+    else has to send the password again. Returns the backup path, or None if there was no
+    database to back up."""
+    backup = None
+    if DB_PATH.exists():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        backup = DB_PATH.with_name(f"{DB_PATH.name}.bak-{stamp}")
+        DB_PATH.replace(backup)
+
+    init_db()
+
+    if keep_admin:
+        allow_chat(keep_admin["chat_id"])
+        upsert_user(
+            telegram_user_id=keep_admin["telegram_user_id"],
+            chat_id=keep_admin["chat_id"],
+            username=keep_admin.get("username", ""),
+            first_name=keep_admin.get("first_name", ""),
+        )
+        promote_to_admin(keep_admin["telegram_user_id"])
+
+    return backup
+
+
 def get_setting(key: str, default: str = "") -> str:
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
