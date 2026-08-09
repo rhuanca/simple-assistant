@@ -1,11 +1,21 @@
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "grocery_bot.db"
+# DB path is env-overridable (GROCERY_BOT_DB) so tests can point at a temp file.
+DB_PATH = Path(os.getenv("GROCERY_BOT_DB", Path(__file__).parent.parent / "grocery_bot.db"))
 DEFAULT_LIST = "groceries"
 ADMIN_USER_ROLE = "admin"
 DEFAULT_USER_ROLE = "member"
+
+# Alert settings live in the `settings` table; these are the seeded defaults.
+DEFAULT_SETTINGS = {
+    "alert_enabled": "true",
+    "alert_interval_days": "3",
+    "alert_hour": "9",
+    "last_alert_at": "",
+}
 
 
 MIGRATIONS = [
@@ -34,6 +44,15 @@ MIGRATIONS = [
         updated_at TEXT NOT NULL
     );
     """,
+    # v3: per-person lists (owner_user_id, NULL = shared/common list) + settings.
+    # Existing items keep owner_user_id = NULL, so they become the common list.
+    """
+    ALTER TABLE items ADD COLUMN owner_user_id INTEGER;
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -58,30 +77,40 @@ def init_db():
             )
 
 
-def add_item(item_text: str, list_name: str = DEFAULT_LIST, added_by: str = "") -> int:
+def _owner_clause(owner_user_id: int | None) -> tuple[str, tuple]:
+    """WHERE fragment + params for filtering by owner. None means the common list."""
+    if owner_user_id is None:
+        return "owner_user_id IS NULL", ()
+    return "owner_user_id = ?", (owner_user_id,)
+
+
+def add_item(item_text: str, owner_user_id: int | None = None, added_by: str = "") -> int:
+    """Add an item. owner_user_id=None puts it on the common list; otherwise a personal list."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
-            "INSERT INTO items (list_name, item_text, added_by, created_at) VALUES (?, ?, ?, ?)",
-            (list_name, item_text, added_by, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO items (list_name, item_text, added_by, created_at, owner_user_id) VALUES (?, ?, ?, ?, ?)",
+            (DEFAULT_LIST, item_text, added_by, datetime.now(timezone.utc).isoformat(), owner_user_id),
         )
         return cursor.lastrowid
 
 
-def get_items(list_name: str = DEFAULT_LIST) -> list[dict]:
+def get_items(owner_user_id: int | None = None) -> list[dict]:
+    clause, params = _owner_clause(owner_user_id)
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT id, item_text, added_by, created_at FROM items WHERE list_name = ? ORDER BY created_at",
-            (list_name,),
+            f"SELECT id, item_text, added_by, created_at FROM items WHERE {clause} ORDER BY created_at",
+            params,
         )
         return [dict(row) for row in rows.fetchall()]
 
 
-def remove_item(item_text: str, list_name: str = DEFAULT_LIST) -> bool:
+def remove_item(item_text: str, owner_user_id: int | None = None) -> bool:
+    clause, params = _owner_clause(owner_user_id)
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
-            "DELETE FROM items WHERE id = (SELECT id FROM items WHERE list_name = ? AND LOWER(item_text) = LOWER(?) LIMIT 1)",
-            (list_name, item_text),
+            f"DELETE FROM items WHERE id = (SELECT id FROM items WHERE {clause} AND LOWER(item_text) = LOWER(?) LIMIT 1)",
+            (*params, item_text),
         )
         return cursor.rowcount > 0
 
@@ -105,9 +134,10 @@ def remove_item_by_id(item_id: int) -> str | None:
         return row[0] if row else None
 
 
-def clear_list(list_name: str = DEFAULT_LIST) -> int:
+def clear_list(owner_user_id: int | None = None) -> int:
+    clause, params = _owner_clause(owner_user_id)
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("DELETE FROM items WHERE list_name = ?", (list_name,))
+        cursor = conn.execute(f"DELETE FROM items WHERE {clause}", params)
         return cursor.rowcount
 
 
@@ -172,3 +202,72 @@ def get_admin_chat_ids() -> list[int]:
             (ADMIN_USER_ROLE,),
         )
         return [row[0] for row in rows.fetchall()]
+
+
+def is_admin(telegram_user_id: int) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM users WHERE telegram_user_id = ? AND role = ?",
+            (telegram_user_id, ADMIN_USER_ROLE),
+        )
+        return row.fetchone() is not None
+
+
+def get_all_users() -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT telegram_user_id, chat_id, username, first_name, role FROM users ORDER BY created_at"
+        )
+        return [dict(row) for row in rows.fetchall()]
+
+
+def find_user_by_username(username: str) -> dict | None:
+    """Look up a user by @username (case-insensitive, leading @ optional)."""
+    name = username.lstrip("@").strip()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT telegram_user_id, chat_id, username, first_name, role FROM users WHERE LOWER(username) = LOWER(?)",
+            (name,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def set_role(telegram_user_id: int, role: str) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET role = ?, updated_at = ? WHERE telegram_user_id = ?",
+            (role, datetime.now(timezone.utc).isoformat(), telegram_user_id),
+        )
+        return cursor.rowcount > 0
+
+
+def revoke_user(telegram_user_id: int) -> bool:
+    """Remove a user and de-authorize their chat so they must re-enter the password."""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "DELETE FROM users WHERE telegram_user_id = ? RETURNING chat_id",
+            (telegram_user_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM allowed_chats WHERE chat_id = ?", (row[0],))
+        return True
+
+
+def get_setting(key: str, default: str = "") -> str:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        if row is not None:
+            return row[0]
+    return DEFAULT_SETTINGS.get(key, default)
+
+
+def set_setting(key: str, value: str) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )

@@ -13,5 +13,5 @@ dependencies = [
     "langgraph>=1.0.0",
     "langsmith>=0.7.25",
     "python-dotenv>=1.2.2",
-    "python-telegram-bot>=22.7",
+    "python-telegram-bot[job-queue]>=22.7",
 ]

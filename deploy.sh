@@ -7,7 +7,7 @@
 #   1. Verifies prerequisites (systemd, uv, .env)
 #   2. Runs `uv sync`
 #   3. Optionally writes a journald drop-in to cap log size at 50M (sudo)
-#   4. Writes ~/.config/systemd/user/grocery-bot.service
+#   4. Writes ~/.config/systemd/user/rr-grocery-bot.service
 #   5. Enables user lingering so the service starts at boot (sudo)
 #   6. Enables and (re)starts the service, then prints status
 #
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVICE_NAME="grocery-bot"
+SERVICE_NAME="rr-grocery-bot"
 UNIT_FILE="$HOME/.config/systemd/user/${SERVICE_NAME}.service"
 JOURNALD_DROPIN="/etc/systemd/journald.conf.d/${SERVICE_NAME}.conf"
 

@@ -1,10 +1,21 @@
 import os
+from datetime import time, timezone
 
 from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
-from bot.handlers import handle_message, help_command, start
-from bot.storage import init_db
+from bot.alerts import run_alert_tick
+from bot.handlers import (
+    alert_command,
+    demote_command,
+    handle_message,
+    help_command,
+    promote_command,
+    revoke_command,
+    start,
+    users_command,
+)
+from bot.storage import get_setting, init_db
 
 
 def _mask_secret(value: str) -> str:
@@ -30,7 +41,19 @@ def main():
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("users", users_command))
+    app.add_handler(CommandHandler("promote", promote_command))
+    app.add_handler(CommandHandler("demote", demote_command))
+    app.add_handler(CommandHandler("revoke", revoke_command))
+    app.add_handler(CommandHandler("alert", alert_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Daily tick that self-checks whether the alert interval has elapsed (see bot/alerts.py).
+    try:
+        alert_hour = int(get_setting("alert_hour"))
+    except ValueError:
+        alert_hour = 9
+    app.job_queue.run_daily(run_alert_tick, time=time(hour=alert_hour, tzinfo=timezone.utc))
 
     print("Bot is running... (Ctrl+C to stop)")
     app.run_polling()
