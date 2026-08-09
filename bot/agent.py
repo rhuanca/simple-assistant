@@ -177,16 +177,20 @@ def remove_items_by_id(
     show_list and retry with fresh ids).
     """
     removed, not_found, stale = [], [], []
+    # Ids are global. Scoping every lookup and delete to the acting user is what stops a
+    # guessed or stale id from reaching someone else's personal list.
+    acting_user_id = _current_user_id.get()
 
     for item_id, expected in zip(ids, texts):
-        current = storage.get_item_by_id(item_id)
+        current = storage.get_item_by_id(item_id, acting_user_id)
         if current is None:
             not_found.append(item_id)
         elif current["item_text"].lower() != expected.lower():
             stale.append(f"id={item_id}: expected '{expected}', got '{current['item_text']}'")
-        else:
-            storage.remove_item_by_id(item_id)
+        elif storage.remove_item_by_id(item_id, acting_user_id):
             removed.append(current["item_text"])
+        else:
+            not_found.append(item_id)
 
     _refresh_user_cache()
 

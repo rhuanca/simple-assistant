@@ -48,6 +48,37 @@ class ItemOwnershipTests(StorageTestCase):
         self.assertEqual(len(storage.get_items(None)), 1)
 
 
+class ItemByIdOwnershipTests(StorageTestCase):
+    """Ids are global, so id-addressed access must be scoped to the acting user."""
+
+    def setUp(self):
+        super().setUp()
+        self.mine = storage.add_item("milk", owner_user_id=1)
+        self.theirs = storage.add_item("secret", owner_user_id=2)
+        self.common = storage.add_item("soap", owner_user_id=None)
+
+    def test_can_read_own_and_common_items(self):
+        self.assertEqual(storage.get_item_by_id(self.mine, 1)["item_text"], "milk")
+        self.assertEqual(storage.get_item_by_id(self.common, 1)["item_text"], "soap")
+
+    def test_cannot_read_another_users_item(self):
+        self.assertIsNone(storage.get_item_by_id(self.theirs, 1))
+
+    def test_cannot_delete_another_users_item(self):
+        self.assertIsNone(storage.remove_item_by_id(self.theirs, 1))
+        self.assertEqual([i["item_text"] for i in storage.get_items(2)], ["secret"])
+
+    def test_can_delete_own_and_common_items(self):
+        self.assertEqual(storage.remove_item_by_id(self.mine, 1), "milk")
+        self.assertEqual(storage.remove_item_by_id(self.common, 1), "soap")
+        self.assertEqual(storage.get_items(1), [])
+        self.assertEqual(storage.get_items(None), [])
+
+    def test_unknown_acting_user_reaches_only_the_common_list(self):
+        self.assertIsNone(storage.get_item_by_id(self.mine, None))
+        self.assertEqual(storage.get_item_by_id(self.common, None)["item_text"], "soap")
+
+
 class SettingsTests(StorageTestCase):
     def test_defaults_returned_when_unset(self):
         self.assertEqual(storage.get_setting("alert_enabled"), "true")

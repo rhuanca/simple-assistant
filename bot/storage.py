@@ -84,6 +84,15 @@ def _owner_clause(owner_user_id: int | None) -> tuple[str, tuple]:
     return "owner_user_id = ?", (owner_user_id,)
 
 
+def _reachable_clause(acting_user_id: int | None) -> tuple[str, tuple]:
+    """WHERE fragment + params for the items `acting_user_id` is allowed to touch: their own
+    personal items plus the common list. Ids are global, so anything addressed by id must be
+    filtered through this — otherwise a guessed id reaches another person's list."""
+    if acting_user_id is None:
+        return "owner_user_id IS NULL", ()
+    return "(owner_user_id = ? OR owner_user_id IS NULL)", (acting_user_id,)
+
+
 def add_item(item_text: str, owner_user_id: int | None = None, added_by: str = "") -> int:
     """Add an item. owner_user_id=None puts it on the common list; otherwise a personal list."""
     with sqlite3.connect(DB_PATH) as conn:
@@ -115,21 +124,28 @@ def remove_item(item_text: str, owner_user_id: int | None = None) -> bool:
         return cursor.rowcount > 0
 
 
-def get_item_by_id(item_id: int) -> dict | None:
+def get_item_by_id(item_id: int, acting_user_id: int | None = None) -> dict | None:
+    """Look up an item the user is allowed to see. Returns None for another person's item,
+    which is indistinguishable from a missing id — callers must not reveal the difference."""
+    clause, params = _reachable_clause(acting_user_id)
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT id, list_name, item_text, added_by, created_at FROM items WHERE id = ?",
-            (item_id,),
+            f"SELECT id, list_name, item_text, added_by, created_at FROM items "
+            f"WHERE id = ? AND {clause}",
+            (item_id, *params),
         ).fetchone()
         return dict(row) if row else None
 
 
-def remove_item_by_id(item_id: int) -> str | None:
+def remove_item_by_id(item_id: int, acting_user_id: int | None = None) -> str | None:
+    """Delete an item the user is allowed to touch. The ownership check is part of the DELETE
+    so a caller cannot widen it by checking first and deleting second."""
+    clause, params = _reachable_clause(acting_user_id)
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute(
-            "DELETE FROM items WHERE id = ? RETURNING item_text",
-            (item_id,),
+            f"DELETE FROM items WHERE id = ? AND {clause} RETURNING item_text",
+            (item_id, *params),
         ).fetchone()
         return row[0] if row else None
 
