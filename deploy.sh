@@ -15,6 +15,19 @@
 #   - Read or modify your .env (you manage secrets yourself)
 #   - Pull code from git (run `git pull` separately)
 
+# Re-exec under bash. Running this as `sh deploy.sh` ignores the shebang and uses dash on
+# Raspberry Pi OS, which has neither [[ ]] nor ${BASH_SOURCE[0]} (older dash also rejects
+# `set -o pipefail`). The failures surface as "Bad substitution" followed by a misleading
+# missing-config error, because a failed [[ exits 127 and trips the || branch whether or not
+# the file is actually there. Everything above this point must stay POSIX sh.
+if [ -z "${BASH_VERSION:-}" ]; then
+    command -v bash >/dev/null 2>&1 || {
+        echo "Error: deploy.sh needs bash. Install it with: sudo apt install bash" >&2
+        exit 1
+    }
+    exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
