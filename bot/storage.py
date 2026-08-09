@@ -15,6 +15,8 @@ DEFAULT_SETTINGS = {
     "alert_interval_days": "3",
     "alert_hour": "9",
     "last_alert_at": "",
+    # Appointments are wall-clock events, so the bot needs to know which clock.
+    "timezone": "America/La_Paz",
 }
 
 
@@ -52,6 +54,21 @@ MIGRATIONS = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
+    """,
+    # v4: appointments. starts_at is LOCAL wall-clock ISO (2026-08-16T15:00), unlike every
+    # other timestamp here: an appointment is a wall-clock event, so storing it local keeps
+    # "is this today?" a plain date comparison. created_at stays UTC like the other tables.
+    """
+    CREATE TABLE IF NOT EXISTS appointments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        starts_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        reminded_day_before INTEGER NOT NULL DEFAULT 0,
+        reminded_same_day INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_appointments_owner ON appointments (owner_user_id, starts_at);
     """,
 ]
 
@@ -155,6 +172,65 @@ def clear_list(owner_user_id: int | None = None) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(f"DELETE FROM items WHERE {clause}", params)
         return cursor.rowcount
+
+
+# --- Appointments -----------------------------------------------------------
+# Every function takes the owner and filters on it. Appointments are personal: there is no
+# shared scope, and no lookup is ever owner-blind.
+
+REMINDER_KINDS = {"day_before": "reminded_day_before", "same_day": "reminded_same_day"}
+
+
+def add_appointment(title: str, starts_at: str, owner_user_id: int) -> int:
+    """Add an appointment. `starts_at` is local wall-clock ISO, e.g. '2026-08-16T15:00'."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "INSERT INTO appointments (owner_user_id, title, starts_at, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (owner_user_id, title, starts_at, datetime.now(timezone.utc).isoformat()),
+        )
+        return cursor.lastrowid
+
+
+def get_upcoming_appointments(owner_user_id: int, now_local_iso: str) -> list[dict]:
+    """Appointments at or after `now_local_iso`, soonest first. ISO strings sort correctly."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, title, starts_at, reminded_day_before, reminded_same_day "
+            "FROM appointments WHERE owner_user_id = ? AND starts_at >= ? ORDER BY starts_at",
+            (owner_user_id, now_local_iso),
+        )
+        return [dict(row) for row in rows.fetchall()]
+
+
+def find_upcoming_appointments(title: str, owner_user_id: int, now_local_iso: str) -> list[dict]:
+    """Upcoming appointments whose title contains `title`, case-insensitively."""
+    needle = title.strip().lower()
+    return [
+        appointment
+        for appointment in get_upcoming_appointments(owner_user_id, now_local_iso)
+        if needle in appointment["title"].lower()
+    ]
+
+
+def cancel_appointment(appointment_id: int, owner_user_id: int) -> str | None:
+    """Delete one appointment, returning its title. None if it is not the user's."""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "DELETE FROM appointments WHERE id = ? AND owner_user_id = ? RETURNING title",
+            (appointment_id, owner_user_id),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def mark_appointment_reminded(appointment_id: int, kind: str) -> None:
+    """Record that a reminder of `kind` ('day_before' or 'same_day') has gone out."""
+    column = REMINDER_KINDS[kind]  # never interpolate caller input into SQL
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            f"UPDATE appointments SET {column} = 1 WHERE id = ?", (appointment_id,)
+        )
 
 
 def is_chat_allowed(chat_id: int) -> bool:

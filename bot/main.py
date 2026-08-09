@@ -1,5 +1,5 @@
 import os
-from datetime import time, timezone
+from datetime import time
 
 from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
@@ -16,6 +16,7 @@ from bot.handlers import (
     start,
     users_command,
 )
+from bot.localtime import get_timezone
 from bot.storage import get_setting, init_db
 
 
@@ -50,12 +51,16 @@ def main():
     app.add_handler(CommandHandler("resetdb", resetdb_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Daily tick that self-checks whether the alert interval has elapsed (see bot/alerts.py).
+    # Daily tick for appointment reminders, which also carries the shopping list when its
+    # interval has elapsed (see bot/alerts.py). The hour is LOCAL: "the morning of" only
+    # means anything in the user's own timezone.
     try:
         alert_hour = int(get_setting("alert_hour"))
     except ValueError:
         alert_hour = 9
-    app.job_queue.run_daily(run_alert_tick, time=time(hour=alert_hour, tzinfo=timezone.utc))
+    app.job_queue.run_daily(
+        run_alert_tick, time=time(hour=alert_hour, tzinfo=get_timezone())
+    )
 
     print("Bot is running... (Ctrl+C to stop)")
     app.run_polling()

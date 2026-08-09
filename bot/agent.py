@@ -5,13 +5,13 @@ from typing import Annotated, Literal
 
 from cachetools import TTLCache
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langsmith import traceable
 from pydantic import Field
 
-from bot import storage
+from bot import localtime, storage
 
 SYSTEM_PROMPT = """\
 You are a grocery list assistant in a Telegram chat. You help users manage their shopping lists.
@@ -44,6 +44,19 @@ If you need ids and no [Recently viewed list] block is present, call show_list f
 fetch the current state. Only fall back to remove_items (name-based) when you cannot
 identify a row by id.
 
+The bot handles two separate things: shopping lists, and the sender's appointments.
+Appointments are always personal — there is no shared appointment schedule.
+
+Every message starts with a [Now: ...] line giving the current local date, time and
+timezone. Resolve every relative date against it ("next Sunday", "el próximo domingo",
+"mañana", "in two weeks") and pass the result to add_appointment as YYYY-MM-DDTHH:MM.
+  - If the user names a day but no time, ASK what time it is and do not save anything yet.
+    Only call add_appointment once you know the time.
+  - Always state the date you worked out back to the user, so a mistake is obvious.
+  - To cancel, pass words from the title to cancel_appointment. If the user points at one
+    by position ("the second one", "la segunda"), call list_appointments first and take the
+    title from that row.
+
 When you cannot understand the request, ask for clarification in the user's language.
 
 Never reply with a bare acknowledgement such as "OK", "Done" or "Listo". Every reply must
@@ -56,6 +69,12 @@ Keep replies short and friendly, but never empty.
 """
 
 _view_cache: TTLCache = TTLCache(maxsize=1000, ttl=30 * 60)
+
+# Short-term conversation memory, so a follow-up like "a las 3" still makes sense after the
+# bot asked what time an appointment is. Deliberately small and short-lived: enough to
+# finish an exchange, not enough for stale context to start steering later answers.
+_HISTORY_EXCHANGES = 3
+_history: TTLCache = TTLCache(maxsize=1000, ttl=10 * 60)
 _current_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
     "current_user_id", default=None
 )
@@ -84,9 +103,10 @@ def _get_cached_view(user_id: int) -> dict | None:
 
 
 def clear_view_cache() -> None:
-    """Drop every cached list view. Needed when the database is rebuilt underneath us, so
-    no one can reference ids that belonged to the old data."""
+    """Drop every cached list view and conversation. Needed when the database is rebuilt
+    underneath us, so no one can reference ids that belonged to the old data."""
     _view_cache.clear()
+    _history.clear()
 
 
 def _refresh_user_cache() -> None:
@@ -233,6 +253,85 @@ def clear_list(scope: _SCOPE_ARG = "personal") -> str:
     return f"🗑️ Cleared {count} item{plural} from {target}."
 
 
+# --- Appointments -----------------------------------------------------------
+
+_NO_USER = "I could not tell who you are, so I cannot manage your appointments."
+
+
+def _render_appointments(title: str, appointments: list[dict]) -> str:
+    lines = [title]
+    for i, appointment in enumerate(appointments, 1):
+        when = localtime.format_local(appointment["starts_at"])
+        lines.append(f"{i}. {when} — {appointment['title']}")
+    return "\n".join(lines)
+
+
+@tool
+def add_appointment(
+    title: Annotated[
+        str, Field(description="What the appointment is for, e.g. 'doctor de gastroenterología'.")
+    ],
+    starts_at: Annotated[
+        str,
+        Field(
+            description="When it starts, in local time, as 'YYYY-MM-DDTHH:MM'. Work out "
+            "relative dates like 'next Sunday' from the [Now] line."
+        ),
+    ],
+) -> str:
+    """Save an appointment for the sender. Call this only once you know both what the
+    appointment is for and what time it starts — if the user gave a day but no time, ask
+    them for the time instead of guessing."""
+    user_id = _current_user_id.get()
+    if user_id is None:
+        return _NO_USER
+    try:
+        moment = localtime.parse_local(starts_at)
+    except ValueError:
+        return f"I could not read '{starts_at}' as a date and time. Use YYYY-MM-DDTHH:MM."
+    storage.add_appointment(title, localtime.to_storage(moment), owner_user_id=user_id)
+    return f"📅 Saved: {localtime.format_local(moment)} — {title}"
+
+
+@tool
+def list_appointments() -> str:
+    """Show the sender's upcoming appointments, soonest first."""
+    user_id = _current_user_id.get()
+    if user_id is None:
+        return _NO_USER
+    now = localtime.to_storage(localtime.now_local())
+    appointments = storage.get_upcoming_appointments(user_id, now)
+    if not appointments:
+        return "📅 You have no upcoming appointments."
+    return _render_appointments(f"📅 Upcoming appointments — {len(appointments)}", appointments)
+
+
+@tool
+def cancel_appointment(
+    title: Annotated[
+        str, Field(description="Words from the appointment's title, e.g. 'doctor'.")
+    ],
+) -> str:
+    """Cancel one upcoming appointment, found by words from its title. If the user refers to
+    one by position ("the second one", "la segunda"), call list_appointments first and pass
+    the title from that row."""
+    user_id = _current_user_id.get()
+    if user_id is None:
+        return _NO_USER
+    now = localtime.to_storage(localtime.now_local())
+    matches = storage.find_upcoming_appointments(title, user_id, now)
+    if not matches:
+        return f"⚠️ No upcoming appointment matches '{title}'."
+    if len(matches) > 1:
+        return _render_appointments(
+            f"Several appointments match '{title}' — which one do you mean?", matches
+        )
+    appointment = matches[0]
+    storage.cancel_appointment(appointment["id"], user_id)
+    when = localtime.format_local(appointment["starts_at"])
+    return f"🗑️ Cancelled: {when} — {appointment['title']}"
+
+
 class AgentError(Exception):
     def __init__(self, user_message: str, admin_detail: str):
         super().__init__(admin_detail)
@@ -240,7 +339,16 @@ class AgentError(Exception):
         self.admin_detail = admin_detail
 
 
-_tools = [add_items, remove_items, remove_items_by_id, show_list, clear_list]
+_tools = [
+    add_items,
+    remove_items,
+    remove_items_by_id,
+    show_list,
+    clear_list,
+    add_appointment,
+    list_appointments,
+    cancel_appointment,
+]
 _agent = None
 
 
@@ -267,7 +375,10 @@ def _get_agent():
 
 @traceable(run_type="prompt", name="build_prompt")
 def _build_prompt(text: str, user: str, user_id: int | None) -> str:
-    parts = []
+    # Without this the model has no idea what day it is and cannot resolve "next Sunday".
+    # It belongs in the per-turn message, not the cached system prompt.
+    now = localtime.now_local()
+    parts = [f"[Now: {localtime.format_local(now)} ({storage.get_setting('timezone')})]"]
     if user_id is not None:
         view = _get_cached_view(user_id)
         if view is not None:
@@ -327,12 +438,20 @@ def format_lists_for(user_id: int) -> str | None:
 @traceable(name="grocery_bot.run", tags=["telegram"])
 async def run(text: str, user: str = "", user_id: int | None = None) -> str:
     message = _build_prompt(text, user, user_id)
+    history = _history.get(user_id, []) if user_id is not None else []
+    # Only the raw exchanges are replayed — re-sending old [Now]/[Recently viewed] blocks
+    # would feed the model stale state.
+    messages = []
+    for past_text, past_reply in history:
+        messages.append(HumanMessage(content=past_text))
+        messages.append(AIMessage(content=past_reply))
+    messages.append(HumanMessage(content=message))
 
     token = _current_user_id.set(user_id)
     try:
         try:
             agent = _get_agent()
-            result = await agent.ainvoke({"messages": [HumanMessage(content=message)]})
+            result = await agent.ainvoke({"messages": messages})
         except Exception as exc:
             error = str(exc)
             if "PERMISSION_DENIED" in error or "403" in error:
@@ -350,4 +469,7 @@ async def run(text: str, user: str = "", user_id: int | None = None) -> str:
     finally:
         _current_user_id.reset(token)
 
-    return _extract_text(result)
+    reply = _extract_text(result)
+    if user_id is not None:
+        _history[user_id] = (history + [(text, reply)])[-_HISTORY_EXCHANGES:]
+    return reply

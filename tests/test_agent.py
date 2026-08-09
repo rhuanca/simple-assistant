@@ -164,6 +164,104 @@ class MutationReplyTests(AgentTestCase):
         )
 
 
+class AppointmentToolTests(AgentTestCase):
+    def _in_days(self, days, hour=15):
+        from datetime import timedelta
+
+        from bot import localtime
+
+        moment = (localtime.now_local() + timedelta(days=days)).replace(
+            hour=hour, minute=0, second=0, microsecond=0
+        )
+        return localtime.to_storage(moment), localtime.format_local(moment)
+
+    def test_add_appointment_echoes_the_resolved_date(self):
+        stored, shown = self._in_days(7)
+        self.assertEqual(
+            agent.add_appointment.invoke({"title": "doctor", "starts_at": stored}),
+            f"📅 Saved: {shown} — doctor",
+        )
+
+    def test_add_appointment_rejects_an_unparseable_time(self):
+        reply = agent.add_appointment.invoke({"title": "doctor", "starts_at": "next sunday"})
+        self.assertIn("could not read", reply.lower())
+        self.assertEqual(storage.get_upcoming_appointments(USER_ID, "0000"), [])
+
+    def test_list_appointments_when_empty(self):
+        self.assertEqual(agent.list_appointments.invoke({}), "📅 You have no upcoming appointments.")
+
+    def test_list_appointments_is_numbered_and_soonest_first(self):
+        later, later_shown = self._in_days(9)
+        sooner, sooner_shown = self._in_days(2)
+        storage.add_appointment("dentista", later, USER_ID)
+        storage.add_appointment("doctor", sooner, USER_ID)
+
+        self.assertEqual(
+            agent.list_appointments.invoke({}),
+            f"📅 Upcoming appointments — 2\n1. {sooner_shown} — doctor\n2. {later_shown} — dentista",
+        )
+
+    def test_list_appointments_hides_other_users(self):
+        stored, _ = self._in_days(3)
+        storage.add_appointment("secreto", stored, USER_ID + 1)
+        self.assertEqual(agent.list_appointments.invoke({}), "📅 You have no upcoming appointments.")
+
+    def test_cancel_appointment(self):
+        stored, shown = self._in_days(4)
+        storage.add_appointment("doctor", stored, USER_ID)
+
+        self.assertEqual(
+            agent.cancel_appointment.invoke({"title": "doctor"}),
+            f"🗑️ Cancelled: {shown} — doctor",
+        )
+        self.assertEqual(storage.get_upcoming_appointments(USER_ID, "0000"), [])
+
+    def test_cancel_appointment_with_no_match(self):
+        reply = agent.cancel_appointment.invoke({"title": "doctor"})
+        self.assertIn("No upcoming appointment matches", reply)
+
+    def test_cancel_appointment_asks_when_several_match(self):
+        first, _ = self._in_days(2)
+        second, _ = self._in_days(5)
+        storage.add_appointment("doctor Ruiz", first, USER_ID)
+        storage.add_appointment("doctor Paz", second, USER_ID)
+
+        reply = agent.cancel_appointment.invoke({"title": "doctor"})
+        self.assertIn("which one", reply.lower())
+        self.assertEqual(len(storage.get_upcoming_appointments(USER_ID, "0000")), 2)
+
+    def test_cannot_cancel_another_users_appointment(self):
+        stored, _ = self._in_days(3)
+        storage.add_appointment("secreto", stored, USER_ID + 1)
+
+        self.assertIn("No upcoming appointment matches", agent.cancel_appointment.invoke({"title": "secreto"}))
+        self.assertEqual(len(storage.get_upcoming_appointments(USER_ID + 1, "0000")), 1)
+
+
+class PromptContextTests(AgentTestCase):
+    def test_prompt_tells_the_model_the_current_date(self):
+        """Without this the model cannot resolve "next Sunday" at all."""
+        prompt = agent._build_prompt("hola", "Renan", USER_ID)
+        self.assertTrue(prompt.startswith("[Now: "))
+        self.assertIn("America/La_Paz", prompt.splitlines()[0])
+
+
+class ConversationMemoryTests(AgentTestCase):
+    def test_history_is_replayed_and_capped(self):
+        for i in range(5):
+            agent._history[USER_ID] = (agent._history.get(USER_ID, []) + [(f"q{i}", f"a{i}")])[
+                -agent._HISTORY_EXCHANGES :
+            ]
+        self.assertEqual(
+            agent._history[USER_ID], [("q2", "a2"), ("q3", "a3"), ("q4", "a4")]
+        )
+
+    def test_clear_view_cache_also_clears_history(self):
+        agent._history[USER_ID] = [("q", "a")]
+        agent.clear_view_cache()
+        self.assertEqual(len(agent._history), 0)
+
+
 class ModelConfigTests(unittest.TestCase):
     def test_thinking_is_disabled(self):
         """With thinking on, gemini-2.5-flash regularly returns 0 output tokens and no tool
