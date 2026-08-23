@@ -29,20 +29,19 @@ You have tools to add items, remove items, show a list, and clear a list.
 
 When the user asks to add or remove items, extract clean item names without articles or filler words.
 
-A [Recently viewed list] block may appear before the user's message. It is internal scratch
-data: never quote it, never repeat an id back to the user, and never treat it as the answer
-to a request to see a list — to show a list, always call show_list and reproduce its output.
-Every row has the form "N. text (id=X)". Use it only to resolve references:
-  - References by number, position, or ordinal ("drop #7", "el séptimo", "the third one")
-    → look up the row by N.
-  - References by name ("remove the cheese", "quita el jamón") → look up the row by text.
-In either case, call remove_items_by_id passing parallel lists: `ids` and the matching
-`texts`. If the tool reports the cache is stale, call show_list and retry from the
-fresh block.
+To remove items, pick the tool that matches how the user referred to them, and call it
+straight away — never answer with a question you could have answered with a tool call:
+  - By number, position or ordinal ("borra el 2", "drop #7", "the third one", "delete 1")
+    → remove_items_by_number with those numbers. Do NOT call show_list first: the tool
+    resolves the numbers itself against the current list.
+  - By name ("quita el jamón", "remove the cheese") → remove_items with the item names.
 
-If you need ids and no [Recently viewed list] block is present, call show_list first to
-fetch the current state. Only fall back to remove_items (name-based) when you cannot
-identify a row by id.
+A [Recently viewed list] block may appear before the user's message, with rows of the form
+"N. text (id=X)". It is internal scratch data: never quote it, never repeat an id back to
+the user, and never treat it as the answer to a request to see a list — to show a list,
+always call show_list and reproduce its output. It is only a hint about what the user is
+looking at; the two tools above are still the way to delete, and the block is often absent
+or out of date, so never wait for it.
 
 The bot handles two separate things: shopping lists, and the sender's appointments.
 Appointments are always personal — there is no shared appointment schedule.
@@ -232,6 +231,50 @@ def remove_items_by_id(
 
 
 @tool
+def remove_items_by_number(
+    numbers: Annotated[
+        list[int], Field(description="Row numbers exactly as shown to the user, starting at 1.")
+    ],
+    scope: _SCOPE_ARG = "personal",
+) -> str:
+    """Remove items by their position in the list — "delete 1", "borra el 2", "the third one".
+
+    Resolves the numbers against the list as it stands right now, so it needs no ids, never
+    goes stale, and works in a single call with nothing looked up beforehand.
+    """
+    owner = _owner_for_scope(scope)
+    items = storage.get_items(owner)
+    acting_user_id = _current_user_id.get()
+
+    targets, missing = [], []
+    # Resolve every number against one snapshot before deleting anything, so the positions
+    # cannot shift underneath a multi-item request.
+    for number in dict.fromkeys(numbers):
+        if 1 <= number <= len(items):
+            targets.append(items[number - 1])
+        else:
+            missing.append(number)
+
+    removed = [
+        item["item_text"]
+        for item in targets
+        if storage.remove_item_by_id(item["id"], acting_user_id)
+    ]
+    _refresh_user_cache()
+
+    report = []
+    if removed:
+        report.append(f"✅ Removed from {_LIST_TARGETS[scope]}: {', '.join(removed)}")
+    if missing:
+        plural = "" if len(items) == 1 else "s"
+        report.append(
+            f"⚠️ There is no item {', '.join(str(n) for n in missing)} — "
+            f"{_LIST_TARGETS[scope]} has {len(items)} item{plural}."
+        )
+    return "\n".join(report) or "Nothing to remove."
+
+
+@tool
 def show_list(scope: _SCOPE_ARG = "personal") -> str:
     """Show all items currently on a shopping list."""
     items = storage.get_items(_owner_for_scope(scope))
@@ -343,6 +386,7 @@ _tools = [
     add_items,
     remove_items,
     remove_items_by_id,
+    remove_items_by_number,
     show_list,
     clear_list,
     add_appointment,

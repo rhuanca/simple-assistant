@@ -106,7 +106,9 @@ class ShowListTests(AgentTestCase):
     def test_shows_only_the_acting_users_items(self):
         storage.add_item("milk", owner_user_id=USER_ID)
         storage.add_item("someone else's", owner_user_id=USER_ID + 1)
-        self.assertEqual(agent.show_list.invoke({"scope": "personal"}), "🛒 My list — 1 item\n1. milk")
+        self.assertEqual(
+            agent.show_list.invoke({"scope": "personal"}), "🛒 My list — 1 item\n1. milk"
+        )
 
 
 class MutationReplyTests(AgentTestCase):
@@ -148,6 +150,61 @@ class MutationReplyTests(AgentTestCase):
             "✅ Removed: soap",
         )
         self.assertEqual(storage.get_items(None), [])
+
+    def test_remove_by_number(self):
+        for item in ("pan", "leche", "huevos"):
+            storage.add_item(item, owner_user_id=USER_ID)
+        self.assertEqual(
+            agent.remove_items_by_number.invoke({"numbers": [2], "scope": "personal"}),
+            "✅ Removed from your list: leche",
+        )
+        self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID)], ["pan", "huevos"])
+
+    def test_remove_by_number_resolves_every_number_before_deleting(self):
+        """Positions are resolved against one snapshot, so deleting 2 does not renumber 4
+        out from under the same request."""
+        for item in ("pan", "leche", "huevos", "queso"):
+            storage.add_item(item, owner_user_id=USER_ID)
+        self.assertEqual(
+            agent.remove_items_by_number.invoke({"numbers": [2, 4], "scope": "personal"}),
+            "✅ Removed from your list: leche, queso",
+        )
+        self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID)], ["pan", "huevos"])
+
+    def test_remove_by_number_reports_out_of_range(self):
+        storage.add_item("pan", owner_user_id=USER_ID)
+        reply = agent.remove_items_by_number.invoke({"numbers": [9], "scope": "personal"})
+
+        self.assertEqual(reply, "⚠️ There is no item 9 — your list has 1 item.")
+        self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID)], ["pan"])
+
+    def test_remove_by_number_ignores_a_repeated_number(self):
+        for item in ("pan", "leche"):
+            storage.add_item(item, owner_user_id=USER_ID)
+        self.assertEqual(
+            agent.remove_items_by_number.invoke({"numbers": [1, 1], "scope": "personal"}),
+            "✅ Removed from your list: pan",
+        )
+
+    def test_remove_by_number_on_the_common_list(self):
+        storage.add_item("mine", owner_user_id=USER_ID)
+        storage.add_item("jabon", owner_user_id=None)
+        self.assertEqual(
+            agent.remove_items_by_number.invoke({"numbers": [1], "scope": "common"}),
+            "✅ Removed from the common list: jabon",
+        )
+        self.assertEqual(storage.get_items(None), [])
+        self.assertEqual(len(storage.get_items(USER_ID)), 1)
+
+    def test_remove_by_number_numbers_only_the_acting_users_items(self):
+        """Numbering comes from the same query show_list uses, so another person's items are
+        not in it and cannot be reached by counting past the end of your own list."""
+        storage.add_item("mine", owner_user_id=USER_ID)
+        storage.add_item("theirs", owner_user_id=USER_ID + 1)
+
+        reply = agent.remove_items_by_number.invoke({"numbers": [2], "scope": "personal"})
+        self.assertIn("no item 2", reply)
+        self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID + 1)], ["theirs"])
 
     def test_clear_list_reports_the_count(self):
         for item in ("milk", "bread"):
@@ -283,6 +340,13 @@ class AlertRenderingTests(AgentTestCase):
         message = agent.format_lists_for(USER_ID)
         self.assertIn("🛒 My list — 1 item\n1. milk", message)
         self.assertIn("🏠 Common list is empty.", message)
+
+    def test_the_digest_never_carries_ids(self):
+        """This one goes straight to Telegram without passing through _reply(), so ids here
+        would reach the user for real."""
+        storage.add_item("milk", owner_user_id=USER_ID)
+        storage.add_item("soap", owner_user_id=None)
+        self.assertNotIn("id=", agent.format_lists_for(USER_ID))
 
 
 if __name__ == "__main__":
