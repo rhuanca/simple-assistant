@@ -143,6 +143,15 @@ class SettingsTests(StorageTestCase):
     def test_unknown_key_uses_provided_default(self):
         self.assertEqual(storage.get_setting("nope", "fallback"), "fallback")
 
+    def test_get_all_settings_returns_only_stored_rows(self):
+        """Defaults are a read-time fallback and are never written, which is what lets
+        /config tell a value someone set from one that is just the default."""
+        self.assertEqual(storage.get_all_settings(), {})
+
+        storage.set_setting("alert_hour", "8")
+        self.assertEqual(storage.get_all_settings(), {"alert_hour": "8"})
+        self.assertEqual(storage.get_setting("alert_interval_days"), "3")  # still a default
+
 
 class AdminHelperTests(StorageTestCase):
     def _add_user(self, uid, chat_id, username, admin=False):

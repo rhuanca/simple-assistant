@@ -16,6 +16,9 @@ What appointments do I have?                       ¿Qué citas tengo?
 Cancel the doctor one                              Cancela la segunda
 ```
 
+`/help` lists everything in chat — lists, appointments and reminders, plus the admin and
+configuration commands when an admin asks.
+
 ## Setup
 
 ### 1. Install uv
@@ -126,7 +129,8 @@ The first authenticated user is the admin and can promote others.
 | `/promote @username` | Make someone an admin |
 | `/demote @username` | Back to member |
 | `/revoke @username` | Remove access entirely |
-| `/alert ...` | Reminder settings (above) |
+| `/alert ...` | Shopping digest settings (above) |
+| `/config` | Show every setting and change it (below) |
 | `/resetdb` | Show what a reset would destroy |
 | `/resetdb CONFIRM` | Rebuild an empty database (see below) |
 
@@ -141,8 +145,21 @@ Stored in a `settings` table, read at each use, with these defaults:
 | `alert_hour` | `9` | Hour of the daily tick, **in local time** |
 | `timezone` | `America/La_Paz` | Clock that appointments and `alert_hour` use |
 
-Defaults are a read-time fallback and are never written to the table. `alert_hour` and
-`timezone` are read at startup for scheduling, so changing them needs a restart.
+Defaults are a read-time fallback and are never written to the table, which is how `/config`
+can show whether a value was set or is still the default.
+
+Admins change them from Telegram:
+
+```
+/config                                show every setting, plus the next reminder time
+/config timezone America/Lima          validated against the IANA database
+/config alert_hour 8                   0-23, local time
+/config alert_interval_days 5
+/config alert_enabled off
+```
+
+Changing `timezone` or `alert_hour` **reschedules the running reminder job**, so it takes
+effect without restarting the service. `last_alert_at` is shown but cannot be edited.
 
 ## Database
 

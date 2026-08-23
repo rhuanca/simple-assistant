@@ -8,12 +8,16 @@ Keeping the "am I due?" decisions in the DB (rather than an in-memory timer) mea
 Raspberry-Pi reboot never loses the schedule — the next daily tick simply re-evaluates.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from telegram.ext import ContextTypes
 
 from bot import localtime, storage
 from bot.agent import format_lists_for
+
+# The job is named so it can be found and replaced when the schedule settings change.
+ALERT_JOB_NAME = "daily_alert"
+DEFAULT_ALERT_HOUR = 9
 
 
 def alert_due(now_iso: str) -> bool:
@@ -95,3 +99,27 @@ async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if groceries_due:
         storage.set_setting("last_alert_at", now.isoformat())
+
+
+def alert_time() -> time:
+    """The daily tick's local time, from settings. A bad `alert_hour` falls back rather than
+    stopping the bot from starting."""
+    try:
+        hour = int(storage.get_setting("alert_hour"))
+    except ValueError:
+        hour = DEFAULT_ALERT_HOUR
+    if not 0 <= hour <= 23:
+        hour = DEFAULT_ALERT_HOUR
+    return time(hour=hour, tzinfo=localtime.get_timezone())
+
+
+def schedule_alert_job(job_queue) -> time:
+    """(Re)schedule the daily tick from the current settings, replacing any existing one.
+
+    Called at startup and again whenever `alert_hour` or `timezone` changes, so a new schedule
+    takes effect without a restart. Returns the time it was scheduled at, for the reply."""
+    for job in job_queue.get_jobs_by_name(ALERT_JOB_NAME):
+        job.schedule_removal()
+    at = alert_time()
+    job_queue.run_daily(run_alert_tick, time=at, name=ALERT_JOB_NAME)
+    return at

@@ -1,12 +1,12 @@
 import os
-from datetime import time
 
 from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
-from bot.alerts import run_alert_tick
+from bot.alerts import schedule_alert_job
 from bot.handlers import (
     alert_command,
+    config_command,
     demote_command,
     handle_message,
     help_command,
@@ -16,8 +16,7 @@ from bot.handlers import (
     start,
     users_command,
 )
-from bot.localtime import get_timezone
-from bot.storage import get_setting, init_db
+from bot.storage import init_db
 
 
 def _mask_secret(value: str) -> str:
@@ -48,19 +47,15 @@ def main():
     app.add_handler(CommandHandler("demote", demote_command))
     app.add_handler(CommandHandler("revoke", revoke_command))
     app.add_handler(CommandHandler("alert", alert_command))
+    app.add_handler(CommandHandler("config", config_command))
     app.add_handler(CommandHandler("resetdb", resetdb_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Daily tick for appointment reminders, which also carries the shopping list when its
     # interval has elapsed (see bot/alerts.py). The hour is LOCAL: "the morning of" only
-    # means anything in the user's own timezone.
-    try:
-        alert_hour = int(get_setting("alert_hour"))
-    except ValueError:
-        alert_hour = 9
-    app.job_queue.run_daily(
-        run_alert_tick, time=time(hour=alert_hour, tzinfo=get_timezone())
-    )
+    # means anything in the user's own timezone. /config reschedules this same job.
+    at = schedule_alert_job(app.job_queue)
+    print(f"Daily reminder at {at.strftime('%H:%M')} {at.tzinfo}")
 
     print("Bot is running... (Ctrl+C to stop)")
     app.run_polling()

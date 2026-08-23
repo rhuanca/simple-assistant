@@ -391,3 +391,9 @@ def set_setting(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+
+def get_all_settings() -> dict[str, str]:
+    """Only the settings actually stored, so callers can tell a set value from a default."""
+    with sqlite3.connect(DB_PATH) as conn:
+        return {row[0]: row[1] for row in conn.execute("SELECT key, value FROM settings")}
