@@ -1,0 +1,38 @@
+{
+  "layout": "architecture",
+  "title": "Grocery Bot",
+  "subtitle": "Telegram in, SQLite out, Gemini picks the tool",
+  "zones": [
+    {
+      "label": "Telegram",
+      "components": [
+        {"id": "chat", "icon": "person", "label": "chat", "caption": "English / Spanish"},
+        {"id": "handlers", "icon": "checklist", "label": "handlers.py", "caption": "auth, /help, /config"}
+      ]
+    },
+    {
+      "label": "Bot",
+      "components": [
+        {"id": "alerts", "icon": "bell", "label": "alerts.py", "caption": "one digest, 09:00 local"},
+        {"id": "agent", "icon": "gear", "label": "agent.py", "caption": "8 tools, thinking off"},
+        {"id": "clock", "icon": "clock", "label": "localtime.py", "caption": "America/La_Paz"}
+      ]
+    },
+    {
+      "label": "Data and model",
+      "components": [
+        {"id": "db", "icon": "database", "label": "SQLite", "caption": "6 tables, self-migrating"},
+        {"id": "gemini", "icon": "cloud", "label": "Gemini Flash", "caption": "picks the tool"}
+      ]
+    }
+  ],
+  "edges": [
+    {"from": "chat", "to": "handlers", "label": "messages"},
+    {"from": "alerts", "to": "chat", "label": "reminder"},
+    {"from": "handlers", "to": "agent", "label": "runs"},
+    {"from": "alerts", "to": "db", "label": "who is due"},
+    {"from": "agent", "to": "db", "label": "read, write"},
+    {"from": "agent", "to": "gemini", "label": "tool calls"},
+    {"from": "clock", "to": "agent", "label": "[Now] line"}
+  ]
+}
