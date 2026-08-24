@@ -129,28 +129,6 @@ class MutationReplyTests(AgentTestCase):
             "✅ Removed from your list: milk\n⚠️ Not found: soap",
         )
 
-    def test_remove_items_by_id(self):
-        item_id = storage.add_item("milk", owner_user_id=USER_ID)
-        self.assertEqual(
-            agent.remove_items_by_id.invoke({"ids": [item_id], "texts": ["milk"]}),
-            "✅ Removed: milk",
-        )
-
-    def test_remove_items_by_id_cannot_touch_another_users_item(self):
-        theirs = storage.add_item("secret", owner_user_id=USER_ID + 1)
-        reply = agent.remove_items_by_id.invoke({"ids": [theirs], "texts": ["secret"]})
-
-        self.assertNotIn("Removed", reply)
-        self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID + 1)], ["secret"])
-
-    def test_remove_items_by_id_works_on_the_common_list(self):
-        common = storage.add_item("soap", owner_user_id=None)
-        self.assertEqual(
-            agent.remove_items_by_id.invoke({"ids": [common], "texts": ["soap"]}),
-            "✅ Removed: soap",
-        )
-        self.assertEqual(storage.get_items(None), [])
-
     def test_remove_by_number(self):
         for item in ("pan", "leche", "huevos"):
             storage.add_item(item, owner_user_id=USER_ID)

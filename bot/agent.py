@@ -36,12 +36,12 @@ straight away — never answer with a question you could have answered with a to
     resolves the numbers itself against the current list.
   - By name ("quita el jamón", "remove the cheese") → remove_items with the item names.
 
-A [Recently viewed list] block may appear before the user's message, with rows of the form
-"N. text (id=X)". It is internal scratch data: never quote it, never repeat an id back to
-the user, and never treat it as the answer to a request to see a list — to show a list,
-always call show_list and reproduce its output. It is only a hint about what the user is
-looking at; the two tools above are still the way to delete, and the block is often absent
-or out of date, so never wait for it.
+A [Recently viewed list] block may appear before the user's message, showing the rows the
+user was last shown and which list they came from. It is internal scratch data: never quote
+it, and never treat it as the answer to a request to see a list — to show a list, always
+call show_list and reproduce its output. It is only a hint about what the user is looking
+at; the two tools above are still the way to delete, and the block is often absent or out
+of date, so never wait for it.
 
 The bot handles two separate things: shopping lists, and the sender's appointments.
 Appointments are always personal — there is no shared appointment schedule.
@@ -91,7 +91,7 @@ def _cache_view(user_id: int, scope: str, raw_items: list[dict]) -> None:
     _view_cache[user_id] = {
         "scope": scope,
         "items": [
-            {"number": i, "id": item["id"], "text": item["item_text"]}
+            {"number": i, "text": item["item_text"]}
             for i, item in enumerate(raw_items, 1)
         ],
     }
@@ -122,7 +122,7 @@ def _refresh_user_cache() -> None:
 def _format_view_block(view: dict) -> str:
     if not view["items"]:
         return f"[Recently viewed {view['scope']} list: (empty)]"
-    lines = [f"  {it['number']}. {it['text']} (id={it['id']})" for it in view["items"]]
+    lines = [f"  {it['number']}. {it['text']}" for it in view["items"]]
     return f"[Recently viewed {view['scope']} list:\n" + "\n".join(lines) + "]"
 
 
@@ -168,7 +168,7 @@ def add_items(
 
 @tool
 def remove_items(
-    items: Annotated[list[str], Field(description="Item names to remove (use only when no [Recently viewed list] block is available).")],
+    items: Annotated[list[str], Field(description="Item names to remove, e.g. ['leche']. Use this whenever the user names what to remove rather than pointing at a row number.")],
     scope: _SCOPE_ARG = "personal",
 ) -> str:
     """Remove one or more items from a shopping list by name."""
@@ -187,47 +187,6 @@ def remove_items(
     if not_found:
         parts.append(f"⚠️ Not found: {', '.join(not_found)}")
     return "\n".join(parts) if parts else "Nothing to remove."
-
-
-@tool
-def remove_items_by_id(
-    ids: Annotated[list[int], Field(description="Database ids from the [Recently viewed list] block.")],
-    texts: Annotated[list[str], Field(description="Texts matching `ids` 1-to-1, for verification.")],
-) -> str:
-    """Remove items by database id. Use this whenever the [Recently viewed list]
-    block contains the items the user is referring to.
-
-    Pass parallel lists from the block. Each row's current text is verified
-    against `texts` before deleting; mismatches are reported as stale (call
-    show_list and retry with fresh ids).
-    """
-    removed, not_found, stale = [], [], []
-    # Ids are global. Scoping every lookup and delete to the acting user is what stops a
-    # guessed or stale id from reaching someone else's personal list.
-    acting_user_id = _current_user_id.get()
-
-    for item_id, expected in zip(ids, texts):
-        current = storage.get_item_by_id(item_id, acting_user_id)
-        if current is None:
-            not_found.append(item_id)
-        elif current["item_text"].lower() != expected.lower():
-            stale.append(f"id={item_id}: expected '{expected}', got '{current['item_text']}'")
-        elif storage.remove_item_by_id(item_id, acting_user_id):
-            removed.append(current["item_text"])
-        else:
-            not_found.append(item_id)
-
-    _refresh_user_cache()
-
-    report = []
-    if removed:
-        report.append(f"✅ Removed: {', '.join(removed)}")
-    if not_found:
-        report.append(f"⚠️ Not found (ids: {', '.join(str(i) for i in not_found)})")
-    if stale:
-        # Internal signal: the model is expected to call show_list and retry.
-        report.append("Cache stale: " + "; ".join(stale))
-    return "\n".join(report) or "Nothing to remove."
 
 
 @tool
@@ -385,7 +344,6 @@ class AgentError(Exception):
 _tools = [
     add_items,
     remove_items,
-    remove_items_by_id,
     remove_items_by_number,
     show_list,
     clear_list,
