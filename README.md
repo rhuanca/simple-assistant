@@ -60,6 +60,8 @@ BOT_PASSWORD=choose-a-secret-password
 
 `LANGSMITH_TRACING=true` (with `LANGSMITH_PROJECT`) optionally enables tracing.
 
+To accept voice notes, also set `SPEECH_API_URL` (see [Voice messages](#voice-messages)).
+
 ### 6. Run
 
 ```bash
@@ -81,6 +83,34 @@ household. Personal is the default — the common list is used only when you say
 
 Items are numbered, and you can delete by number ("borra el 2") or by name ("quita el pan").
 Personal lists are private: nobody else can see or change yours.
+
+## Voice messages
+
+Send a voice note and it is treated exactly like a typed message: "agrega leche y huevos"
+spoken works the same as written. The bot echoes what it heard above its reply, so a
+mis-transcription is obvious immediately:
+
+```
+🎤 «agrega leche y huevos»
+
+✅ Added to your list: leche, huevos
+```
+
+Transcription runs on your own OpenAI-compatible speech server
+([speaches](https://speaches.ai/)) — the audio never leaves your network. Configure it in
+`.env`:
+
+```
+SPEECH_API_URL=http://192.168.68.114:8000/v1
+SPEECH_STT_MODEL=Systran/faster-whisper-tiny     # optional, this is the default
+```
+
+Voice is optional: without `SPEECH_API_URL` the bot runs normally and answers voice notes
+with "not set up". `faster-whisper-tiny` is fast but rough, especially on Spanish — if
+transcriptions disappoint, pull a bigger model on the server and point `SPEECH_STT_MODEL`
+at it (e.g. `Systran/faster-whisper-small`).
+
+The password cannot be spoken — authentication stays text-only.
 
 ## Appointments
 
