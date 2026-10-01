@@ -9,6 +9,7 @@ from bot.handlers import (
     config_command,
     demote_command,
     handle_message,
+    handle_voice,
     help_command,
     promote_command,
     resetdb_command,
@@ -50,6 +51,7 @@ def main():
     app.add_handler(CommandHandler("config", config_command))
     app.add_handler(CommandHandler("resetdb", resetdb_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
     # Daily tick for appointment reminders, which also carries the shopping list when its
     # interval has elapsed (see bot/alerts.py). The hour is LOCAL: "the morning of" only

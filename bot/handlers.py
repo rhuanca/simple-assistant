@@ -1,3 +1,4 @@
+import asyncio
 import os
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -5,6 +6,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
+from bot import voice
 from bot.agent import AgentError, clear_view_cache, run
 from bot.alerts import alert_time, schedule_alert_job
 from bot.storage import (
@@ -51,6 +53,9 @@ HELP = (
     '• "What appointments do I have?" / "¿Qué citas tengo?"\n'
     '• "Cancel the doctor one" / "Cancela la segunda"\n'
     "Appointments are personal. If you don't give a time, I ask before saving anything.\n\n"
+    "🎤 *Voice / Voz*\n"
+    "Send a voice note and I'll do the same things. I show you what I heard.\n"
+    "Envíame una nota de voz y hago lo mismo. Te muestro lo que entendí.\n\n"
     "⏰ *Reminders / Recordatorios*\n"
     "One message a day: appointments the day before and the morning of, plus your lists "
     "every few days."
@@ -118,10 +123,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Wrong password. / Contraseña incorrecta.")
         return
 
-    user = first_name
+    await _run_and_reply(update, context, text)
+
+
+async def _run_and_reply(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, prefix: str = ""
+) -> None:
+    """Send `text` through the agent and reply, never leaving the user without an answer.
+    `prefix` is prepended to the reply (the voice handler uses it to echo the transcript)."""
+    chat_id = update.effective_chat.id
+    user_obj = update.effective_user
+    user_id = user_obj.id if user_obj else 0
+    first_name = user_obj.first_name if user_obj and user_obj.first_name else "Someone"
+
     await update.effective_chat.send_action("typing")
     try:
-        reply = await run(text, user=user, user_id=user_id)
+        reply = await run(text, user=first_name, user_id=user_id)
     except AgentError as exc:
         reply = exc.user_message
         await _notify_admins(context, f"⚠️ Bot error from {first_name} (chat {chat_id}):\n{exc.admin_detail}")
@@ -129,7 +146,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Never leave the user without a reply.
         reply = "Something went wrong on my side. Please try again. / Algo salió mal, inténtalo de nuevo."
         await _notify_admins(context, f"⚠️ Bot error from {first_name} (chat {chat_id}):\n{exc!r}")
-    await update.message.reply_text(reply)
+    await update.message.reply_text(prefix + reply)
+
+
+VOICE_NOT_CONFIGURED = (
+    "🎤 Voice messages are not set up on this bot.\n"
+    "🎤 Los mensajes de voz no están configurados en este bot."
+)
+VOICE_NOT_UNDERSTOOD = (
+    "🎤 I couldn't make out any words — please try again.\n"
+    "🎤 No entendí nada — inténtalo de nuevo."
+)
+VOICE_FAILED = (
+    "🎤 I couldn't process that voice message. Please try again or type it.\n"
+    "🎤 No pude procesar ese mensaje de voz. Inténtalo de nuevo o escríbelo."
+)
+
+
+def format_transcript(transcript: str) -> str:
+    """The heard-text echo shown above the reply, so a mis-transcription is obvious."""
+    return f"🎤 «{transcript}»\n\n"
+
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_chat_allowed(update.effective_chat.id):
+        # The password must be typed; a spoken one would depend on transcription luck.
+        await update.message.reply_text(AUTH_PROMPT)
+        return
+    if not voice.is_configured():
+        await update.message.reply_text(VOICE_NOT_CONFIGURED)
+        return
+
+    await update.effective_chat.send_action("typing")
+    try:
+        file = await update.message.voice.get_file()
+        audio = bytes(await file.download_as_bytearray())
+        # The speech client is sync; a thread keeps transcription off the event loop.
+        text = await asyncio.to_thread(voice.transcribe, audio)
+    except Exception as exc:
+        await update.message.reply_text(VOICE_FAILED)
+        user_obj = update.effective_user
+        first_name = user_obj.first_name if user_obj and user_obj.first_name else "Someone"
+        await _notify_admins(
+            context,
+            f"⚠️ Voice transcription error from {first_name} "
+            f"(chat {update.effective_chat.id}):\n{exc!r}",
+        )
+        return
+
+    if not text:
+        await update.message.reply_text(VOICE_NOT_UNDERSTOOD)
+        return
+    await _run_and_reply(update, context, text, prefix=format_transcript(text))
 
 
 async def _notify_admins(context: ContextTypes.DEFAULT_TYPE, message: str) -> None:

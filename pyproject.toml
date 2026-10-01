@@ -12,6 +12,7 @@ dependencies = [
     "langchain-openai>=1.2.2",
     "langgraph>=1.0.0",
     "langsmith>=0.7.25",
+    "openai>=2.38.0",
     "python-dotenv>=1.2.2",
     "python-telegram-bot[job-queue]>=22.7",
 ]

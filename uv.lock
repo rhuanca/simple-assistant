@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -290,6 +290,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "langsmith" },
+    { name = "openai" },
     { name = "python-dotenv" },
     { name = "python-telegram-bot", extra = ["job-queue"] },
 ]
@@ -303,6 +304,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.2.2" },
     { name = "langgraph", specifier = ">=1.0.0" },
     { name = "langsmith", specifier = ">=0.7.25" },
+    { name = "openai", specifier = ">=2.38.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "python-telegram-bot", extras = ["job-queue"], specifier = ">=22.7" },
 ]
