@@ -95,7 +95,7 @@ from bot.storage import is_admin
 Add this function near `handle_message`:
 
 ```python
-LOGS_UNIT = "grocery-bot.service"
+LOGS_UNIT = "rr-grocery-bot.service"
 LOGS_MAX_CHARS = 3900   # Telegram caps messages at 4096
 
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -165,7 +165,7 @@ This caps disk usage at 50 MB total. If you'd rather have logs only in RAM (zero
 
 ```bash
 mkdir -p ~/.config/systemd/user
-nano ~/.config/systemd/user/grocery-bot.service
+nano ~/.config/systemd/user/rr-grocery-bot.service
 ```
 
 Paste:
@@ -194,8 +194,8 @@ WantedBy=default.target
 ```bash
 sudo loginctl enable-linger $USER          # lets your user services run at boot without you logged in
 systemctl --user daemon-reload
-systemctl --user enable --now grocery-bot.service
-systemctl --user status grocery-bot.service
+systemctl --user enable --now rr-grocery-bot.service
+systemctl --user status rr-grocery-bot.service
 ```
 
 You should see `active (running)`. Press `q` to exit the status view.
@@ -203,7 +203,7 @@ You should see `active (running)`. Press `q` to exit the status view.
 ## Step 7 — Verify end-to-end
 
 ```bash
-journalctl --user -u grocery-bot -f        # tail the live logs
+journalctl --user -u rr-grocery-bot -f        # tail the live logs
 ```
 
 In another window or on your phone, message the bot. You should see request lines scroll by. Then send `/logs` from your authenticated admin account — the bot should reply with the last 50 lines as a code block.
@@ -216,13 +216,13 @@ Reboot the Pi (`sudo reboot`) and confirm the bot comes back on its own.
 
 | Task | Command |
 | --- | --- |
-| View live logs | `journalctl --user -u grocery-bot -f` |
-| Last N lines | `journalctl --user -u grocery-bot -n 200` |
-| Restart bot | `systemctl --user restart grocery-bot` |
-| Stop bot | `systemctl --user stop grocery-bot` |
-| Service status | `systemctl --user status grocery-bot` |
-| Update code | `cd ~/src/simple-assistant && git pull && uv sync && systemctl --user restart grocery-bot` |
-| Disable auto-start | `systemctl --user disable grocery-bot` |
+| View live logs | `journalctl --user -u rr-grocery-bot -f` |
+| Last N lines | `journalctl --user -u rr-grocery-bot -n 200` |
+| Restart bot | `systemctl --user restart rr-grocery-bot` |
+| Stop bot | `systemctl --user stop rr-grocery-bot` |
+| Service status | `systemctl --user status rr-grocery-bot` |
+| Update code | `cd ~/src/simple-assistant && git pull && uv sync && systemctl --user restart rr-grocery-bot` |
+| Disable auto-start | `systemctl --user disable rr-grocery-bot` |
 
 The DB migration system runs automatically on every restart, so `git pull` + `restart` is a complete deploy step.
 
@@ -230,7 +230,25 @@ The DB migration system runs automatically on every restart, so `git pull` + `re
 
 ## Troubleshooting
 
-**Service won't start (`status` shows `failed`).** Check the journal: `journalctl --user -u grocery-bot -n 100`. Most common: wrong path to `uv` in the unit file (`which uv` to find it), or `.env` missing.
+**Logs show `telegram.error.Conflict: terminated by other getUpdates request`, and a killed
+bot process comes back on its own a minute later.** Two systemd units are running the bot
+(each with `Restart=on-failure`, so killing the process just makes its unit restart it).
+This happens if you once created `grocery-bot.service` by hand from an older version of
+this guide and later ran `deploy.sh`, which manages `rr-grocery-bot.service` — possibly
+from two different clones of the repo. Find them and keep only the rr- one:
+
+```bash
+systemctl --user list-unit-files | grep grocery
+ps -o pid,unit,uunit,cmd -p $(pgrep -d, -f bot.main)   # which unit owns each process
+systemctl --user disable --now grocery-bot.service      # the old one
+rm ~/.config/systemd/user/grocery-bot.service
+systemctl --user daemon-reload
+```
+
+Each clone has its own `grocery_bot.db` — before deleting an old clone, check which
+database holds your real users and lists, and copy it into the surviving clone first.
+
+**Service won't start (`status` shows `failed`).** Check the journal: `journalctl --user -u rr-grocery-bot -n 100`. Most common: wrong path to `uv` in the unit file (`which uv` to find it), or `.env` missing.
 
 **Bot dies with "Killed" in the logs.** Out of memory. Add a swap file:
 
@@ -241,7 +259,7 @@ sudo dphys-swapfile setup
 sudo dphys-swapfile swapon
 ```
 
-Then `systemctl --user restart grocery-bot`.
+Then `systemctl --user restart rr-grocery-bot`.
 
 **`/logs` command returns nothing in Telegram but `journalctl` works in shell.** The command runs as the same user, so it should see the journal. If it still fails, check that `--user` works for that user: `journalctl --user -n 5`. If the user has no journal directory yet, restarting the service generates one.
 
