@@ -1,12 +1,15 @@
 import asyncio
 import contextlib
 import io
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from telegram.error import Conflict, TimedOut
 
-from bot import handlers
+from bot import handlers, storage
 
 
 class FakeChat:
@@ -49,6 +52,82 @@ class WithTypingTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(RuntimeError):
             await handlers._with_typing(chat, boom())
+
+
+class _ReplyChat:
+    def __init__(self, chat_id):
+        self.id = chat_id
+        self.actions = []
+
+    async def send_action(self, action):
+        self.actions.append(action)
+
+
+class _ReplyMessage:
+    def __init__(self):
+        self.replies = []
+
+    async def reply_text(self, text, **kwargs):
+        self.replies.append(text)
+
+
+class _VoiceBot:
+    def __init__(self):
+        self.voices = []
+
+    async def send_voice(self, chat_id, audio):
+        self.voices.append((chat_id, audio))
+
+
+class VoiceReplyTests(unittest.IsolatedAsyncioTestCase):
+    """The voice_replies setting: every agent reply also goes out as a voice note."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._orig_db = storage.DB_PATH
+        storage.DB_PATH = Path(self._tmp.name) / "test.db"
+        self.addCleanup(lambda: setattr(storage, "DB_PATH", self._orig_db))
+        storage.init_db()
+
+    async def _reply(self, flag=None, configured=True):
+        if flag is not None:
+            storage.set_setting("voice_replies", flag)
+        update = SimpleNamespace(
+            effective_chat=_ReplyChat(100),
+            effective_user=SimpleNamespace(id=1, first_name="Renan"),
+            message=_ReplyMessage(),
+        )
+        context = SimpleNamespace(bot=_VoiceBot())
+
+        async def fake_run(text, user="", user_id=None):
+            return "✅ Agregado a tu lista: leche"
+
+        with mock.patch.object(handlers, "run", fake_run):
+            with mock.patch.object(handlers.voice, "is_configured", return_value=configured):
+                with mock.patch.object(
+                    handlers.voice, "synthesize", return_value=b"mp3-bytes"
+                ) as synthesize:
+                    await handlers._run_and_reply(update, context, "agrega leche")
+        return update, context, synthesize
+
+    async def test_flag_on_speaks_the_reply_without_emoji(self):
+        update, context, synthesize = await self._reply(flag="true")
+
+        self.assertEqual(update.message.replies, ["✅ Agregado a tu lista: leche"])
+        self.assertEqual(context.bot.voices, [(100, b"mp3-bytes")])
+        synthesize.assert_called_once_with("Agregado a tu lista: leche")
+
+    async def test_off_by_default(self):
+        _, context, synthesize = await self._reply()
+        self.assertEqual(context.bot.voices, [])
+        synthesize.assert_not_called()
+
+    async def test_flag_without_a_speech_server_stays_text_only(self):
+        update, context, synthesize = await self._reply(flag="true", configured=False)
+        self.assertEqual(update.message.replies, ["✅ Agregado a tu lista: leche"])
+        self.assertEqual(context.bot.voices, [])
+        synthesize.assert_not_called()
 
 
 class ErrorHandlerTests(unittest.IsolatedAsyncioTestCase):

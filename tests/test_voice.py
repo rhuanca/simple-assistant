@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import unittest
 from unittest import mock
@@ -108,6 +110,35 @@ class SynthesizeTests(unittest.TestCase):
         )
         self.assertEqual(create.call_args.kwargs["model"], "other-model")
         self.assertEqual(create.call_args.kwargs["voice"], "em_alex")
+
+
+class SpeakableTests(unittest.TestCase):
+    def test_strips_emoji_from_a_reply(self):
+        self.assertEqual(
+            voice.speakable("✅ Agregado a tu lista: leche"), "Agregado a tu lista: leche"
+        )
+
+    def test_multiline_replies_keep_their_lines(self):
+        self.assertEqual(
+            voice.speakable("🛒 Mi lista — 2 artículos\n1. leche\n2. pan"),
+            "Mi lista — 2 artículos\n1. leche\n2. pan",
+        )
+
+
+class SendVoiceNoteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sends_the_synthesized_audio(self):
+        bot = mock.Mock(send_voice=mock.AsyncMock())
+        with mock.patch.object(voice, "synthesize", return_value=b"mp3-bytes"):
+            await voice.send_voice_note(bot, 5, "hola")
+        bot.send_voice.assert_awaited_once_with(5, b"mp3-bytes")
+
+    async def test_a_failure_is_logged_never_raised(self):
+        bot = mock.Mock(send_voice=mock.AsyncMock(side_effect=RuntimeError("upload died")))
+        out = io.StringIO()
+        with mock.patch.object(voice, "synthesize", return_value=b"mp3-bytes"):
+            with contextlib.redirect_stdout(out):
+                await voice.send_voice_note(bot, 5, "hola")
+        self.assertIn("Failed to send voice note", out.getvalue())
 
 
 class TranscriptEchoTests(unittest.TestCase):

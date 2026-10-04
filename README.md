@@ -117,6 +117,13 @@ robotic aloud:
 It is best-effort — if TTS fails, the text reminder still goes out, and the failure is
 only logged. Kokoro's Spanish voices are `ef_dora`, `em_alex` and `em_santa`.
 
+Optionally, the bot can answer **every** message with a voice note too (the reply text,
+emoji stripped). Off by default; admins enable it at runtime with:
+
+```
+/config voice_replies on
+```
+
 Voice is optional: without `SPEECH_API_URL` the bot runs normally and answers voice notes
 with "not set up". `faster-whisper-tiny` is fast but rough, especially on Spanish — if
 transcriptions disappoint, pull a bigger model on the server and point `SPEECH_STT_MODEL`
@@ -196,6 +203,7 @@ Stored in a `settings` table, read at each use, with these defaults:
 | `alert_interval_days` | `3` | Days between shopping digests |
 | `alert_hour` | `9` | Hour of the daily tick, **in local time** |
 | `timezone` | `America/La_Paz` | Clock that appointments and `alert_hour` use |
+| `voice_replies` | `false` | Also answer every message with a voice note |
 
 Defaults are a read-time fallback and are never written to the table, which is how `/config`
 can show whether a value was set or is still the default.

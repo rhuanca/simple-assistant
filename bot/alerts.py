@@ -8,7 +8,6 @@ Keeping the "am I due?" decisions in the DB (rather than an in-memory timer) mea
 Raspberry-Pi reboot never loses the schedule — the next daily tick simply re-evaluates.
 """
 
-import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 
 from telegram.ext import ContextTypes
@@ -133,16 +132,6 @@ def compose_reminder(user_id: int, name: str, due: list[tuple[dict, str]],
     return text, spoken, lists_section is not None
 
 
-async def _send_voice_note(bot, chat_id: int, spoken: str) -> None:
-    """Best effort: the text is already delivered, so a TTS or upload failure must never
-    retrigger a reminder — log and move on."""
-    try:
-        audio = await asyncio.to_thread(voice.synthesize, spoken)
-        await bot.send_voice(chat_id, audio)
-    except Exception as exc:
-        print(f"Failed to send voice alert to {chat_id}: {exc}")
-
-
 async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
     """JobQueue callback. Sends each user one message combining any appointment reminders
     due today with the shopping lists, the latter only when its interval has elapsed."""
@@ -176,7 +165,7 @@ async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
             storage.mark_appointment_reminded(appointment["id"], kind)
 
         if voice.is_configured():
-            await _send_voice_note(context.bot, user["chat_id"], spoken)
+            await voice.send_voice_note(context.bot, user["chat_id"], spoken)
 
     # Only a digest that actually reached someone resets the interval clock; otherwise the
     # next tick (e.g. right after items appear on a list) is free to send one.
@@ -202,7 +191,7 @@ async def send_test_reminder(context, user_id: int, chat_id: int, name: str) -> 
     text, spoken, _ = composed
     await context.bot.send_message(chat_id, text)
     if voice.is_configured():
-        await _send_voice_note(context.bot, chat_id, spoken)
+        await voice.send_voice_note(context.bot, chat_id, spoken)
     return True
 
 

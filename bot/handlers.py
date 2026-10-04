@@ -165,6 +165,13 @@ async def _run_and_reply(
         await _notify_admins(context, f"⚠️ Error del bot de {first_name} (chat {chat_id}):\n{exc!r}")
     await update.message.reply_text(prefix + reply)
 
+    # Optional voice reply (the `voice_replies` setting, off by default). Only the reply is
+    # spoken, not the echoed transcript — the user just said that part themselves.
+    if get_setting("voice_replies") == "true" and voice.is_configured():
+        spoken = voice.speakable(reply)
+        if spoken:
+            await voice.send_voice_note(context.bot, chat_id, spoken)
+
 
 VOICE_NOT_CONFIGURED = "🎤 Los mensajes de voz no están configurados en este bot."
 VOICE_NOT_UNDERSTOOD = "🎤 No entendí nada — inténtalo de nuevo."
@@ -398,6 +405,7 @@ CONFIG_KEYS = {
     "alert_hour": (_parse_hour, "0-23, hora local del recordatorio diario"),
     "alert_interval_days": (_parse_days, "días entre recordatorios de compras (1 o más)"),
     "alert_enabled": (_parse_bool, "on u off, para el recordatorio de compras"),
+    "voice_replies": (_parse_bool, "on u off, responder también con una nota de voz"),
 }
 
 # Changing these two moves the daily job, so it has to be rescheduled to take effect.

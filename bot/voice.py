@@ -6,7 +6,9 @@ without SPEECH_API_URL the bot runs fine — voice notes get a "not set up" repl
 daily reminder is text only.
 """
 
+import asyncio
 import os
+import re
 
 from openai import OpenAI
 
@@ -50,3 +52,24 @@ def synthesize(text: str) -> bytes:
         response_format="mp3",  # Telegram's send_voice accepts mp3 directly
     )
     return response.content
+
+
+# Emoji and symbol ranges a TTS voice would either skip or read out loud; bot replies
+# are full of them (✅, 🛒, 📅 ...).
+_UNSPEAKABLE = re.compile(r"[☀-➿️\U0001F000-\U0001FAFF]")
+
+
+def speakable(text: str) -> str:
+    """Strip emoji and tidy the leftover whitespace so a reply reads well aloud."""
+    lines = (_UNSPEAKABLE.sub("", line).strip() for line in text.splitlines())
+    return "\n".join(lines).strip()
+
+
+async def send_voice_note(bot, chat_id: int, spoken: str) -> None:
+    """Synthesize and send `spoken` as a voice note, best effort: callers have already
+    delivered the text, so a TTS or upload failure must never affect it — log and move on."""
+    try:
+        audio = await asyncio.to_thread(synthesize, spoken)
+        await bot.send_voice(chat_id, audio)
+    except Exception as exc:
+        print(f"Failed to send voice note to {chat_id}: {exc}")

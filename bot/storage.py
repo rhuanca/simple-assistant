@@ -15,6 +15,8 @@ DEFAULT_SETTINGS = {
     "alert_interval_days": "3",
     "alert_hour": "9",
     "last_alert_at": "",
+    # When "true", every agent reply is also sent as a voice note (needs SPEECH_API_URL).
+    "voice_replies": "false",
     # Appointments are wall-clock events, so the bot needs to know which clock.
     "timezone": "America/La_Paz",
 }
