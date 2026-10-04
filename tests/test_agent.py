@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -307,6 +308,45 @@ class ModelConfigTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
             model = agent._build_model()
         self.assertEqual(model.thinking_budget, 0)
+
+
+class MakeSpeakableTests(unittest.IsolatedAsyncioTestCase):
+    """Replies whose layout sounds robotic (numbered rows, counts, clock times) get a
+    model rewrite before TTS; short prose skips the model, and failures fall back."""
+
+    def _model(self, reply=None, error=None):
+        model = mock.Mock()
+        if error is not None:
+            model.ainvoke = mock.AsyncMock(side_effect=error)
+        else:
+            model.ainvoke = mock.AsyncMock(return_value=AIMessage(reply))
+        return model
+
+    async def test_short_prose_skips_the_model(self):
+        model = self._model("unused")
+        with mock.patch.object(agent, "_get_speech_model", return_value=model):
+            spoken = await agent.make_speakable("✅ Agregado a tu lista: leche")
+        self.assertEqual(spoken, "Agregado a tu lista: leche")
+        model.ainvoke.assert_not_called()
+
+    async def test_a_list_reply_is_rewritten_for_speech(self):
+        model = self._model("En tu lista tienes: leche.")
+        with mock.patch.object(agent, "_get_speech_model", return_value=model):
+            spoken = await agent.make_speakable("🛒 Mi lista — 1 artículo\n1. leche")
+        self.assertEqual(spoken, "En tu lista tienes: leche.")
+        self.assertIn("1. leche", model.ainvoke.call_args.args[0])
+
+    async def test_a_model_failure_falls_back_to_plain_text(self):
+        model = self._model(error=RuntimeError("quota"))
+        with mock.patch.object(agent, "_get_speech_model", return_value=model):
+            spoken = await agent.make_speakable("🛒 Mi lista — 1 artículo\n1. leche")
+        self.assertEqual(spoken, "Mi lista — 1 artículo\n1. leche")
+
+    async def test_an_empty_rewrite_falls_back_to_plain_text(self):
+        model = self._model("   ")
+        with mock.patch.object(agent, "_get_speech_model", return_value=model):
+            spoken = await agent.make_speakable("📅 Próximas citas — 1\n1. dom 16 ago 2026, 15:00 — doctor")
+        self.assertEqual(spoken, "Próximas citas — 1\n1. dom 16 ago 2026, 15:00 — doctor")
 
 
 class AlertRenderingTests(AgentTestCase):

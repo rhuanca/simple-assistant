@@ -11,7 +11,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langsmith import traceable
 from pydantic import Field
 
-from bot import localtime, storage
+from bot import localtime, storage, voice
 
 SYSTEM_PROMPT = """\
 You are a grocery list assistant in a Telegram chat. You help users manage their shopping lists.
@@ -422,6 +422,52 @@ def _extract_text(result: dict) -> str:
         if isinstance(message, ToolMessage):
             return _reply(str(message.content))
     return "Listo."
+
+
+# --- Spoken replies ---------------------------------------------------------
+
+_SPEAK_PROMPT = """\
+Rewrite the following Telegram bot message as it should be SPOKEN aloud by a voice \
+assistant, in the same language as the message. Keep every piece of information, but:
+- no emoji, no row numbers, no counts like "2 artículos"
+- join items naturally: "leche, pan y huevos"
+- say dates and times as words: "el domingo 16 a las 3 de la tarde", never "15:00"
+- one or two short natural sentences
+Return ONLY the spoken text, nothing else.
+
+Message:
+"""
+
+_speech_model = None
+
+
+def _get_speech_model():
+    global _speech_model
+    if _speech_model is None:
+        _speech_model = _build_model()
+    return _speech_model
+
+
+def _reads_badly_aloud(reply: str) -> bool:
+    """Numbered rows, counts and clock times are what sound robotic; a short prose reply
+    without digits or line breaks is already fine and not worth a model call."""
+    return "\n" in reply or any(ch.isdigit() for ch in reply)
+
+
+@traceable(name="make_speakable")
+async def make_speakable(reply: str) -> str:
+    """The reply as it should be spoken by TTS. Replies whose layout would sound robotic
+    are rewritten by the model; everything else — and any rewrite failure — falls back to
+    the plain emoji-stripped text, so the voice note always goes out."""
+    if _reads_badly_aloud(reply):
+        try:
+            result = await _get_speech_model().ainvoke(_SPEAK_PROMPT + reply)
+            text = _message_text(result)
+            if text:
+                return text
+        except Exception as exc:
+            print(f"Spoken rewrite failed, falling back to plain text: {exc}")
+    return voice.speakable(reply)
 
 
 def format_lists_for(user_id: int) -> str | None:

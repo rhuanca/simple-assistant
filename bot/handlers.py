@@ -9,7 +9,7 @@ from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
 from bot import voice
-from bot.agent import AgentError, clear_view_cache, run
+from bot.agent import AgentError, clear_view_cache, make_speakable, run
 from bot.alerts import alert_time, schedule_alert_job, send_test_reminder
 from bot.storage import (
     ADMIN_USER_ROLE,
@@ -168,7 +168,7 @@ async def _run_and_reply(
     # Optional voice reply (the `voice_replies` setting, off by default). Only the reply is
     # spoken, not the echoed transcript — the user just said that part themselves.
     if get_setting("voice_replies") == "true" and voice.is_configured():
-        spoken = voice.speakable(reply)
+        spoken = await make_speakable(reply)
         if spoken:
             await voice.send_voice_note(context.bot, chat_id, spoken)
 

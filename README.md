@@ -117,12 +117,18 @@ robotic aloud:
 It is best-effort — if TTS fails, the text reminder still goes out, and the failure is
 only logged. Kokoro's Spanish voices are `ef_dora`, `em_alex` and `em_santa`.
 
-Optionally, the bot can answer **every** message with a voice note too (the reply text,
-emoji stripped). Off by default; admins enable it at runtime with:
+Optionally, the bot can answer **every** message with a voice note too. Off by default;
+admins enable it at runtime with:
 
 ```
 /config voice_replies on
 ```
+
+Replies whose layout would sound robotic aloud — numbered rows, item counts, clock times —
+are first rewritten for speech by the model ("🛒 Mi lista — 1 artículo / 1. leche" is
+spoken as «En tu lista tienes: leche»). Short prose replies are spoken as-is, and if the
+rewrite fails the plain text is spoken instead — the voice note is always best-effort and
+never delays or affects the text reply.
 
 Voice is optional: without `SPEECH_API_URL` the bot runs normally and answers voice notes
 with "not set up". `faster-whisper-tiny` is fast but rough, especially on Spanish — if
