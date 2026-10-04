@@ -114,12 +114,43 @@ def spoken_shopping_lists(user_id: int) -> str | None:
     return " ".join(phrases) or None
 
 
+def compose_reminder(user_id: int, name: str, due: list[tuple[dict, str]],
+                     include_lists: bool) -> tuple[str, str, bool] | None:
+    """One user's reminder: (text message, spoken script, whether a lists section made it
+    in). None when there is nothing to say to this user."""
+    lists_section = format_lists_for(user_id) if include_lists else None
+    sections = [s for s in (format_appointment_reminder(due), lists_section) if s]
+    if not sections:
+        return None
+    text = "\n\n".join([f"👋 Hola, {name}" if name else "👋 Hola", *sections])
+    spoken = " ".join(
+        [f"Hola, {name}." if name else "Hola."]
+        + [s for s in (
+            spoken_appointment_reminder(due),
+            spoken_shopping_lists(user_id) if include_lists else None,
+        ) if s]
+    )
+    return text, spoken, lists_section is not None
+
+
+async def _send_voice_note(bot, chat_id: int, spoken: str) -> None:
+    """Best effort: the text is already delivered, so a TTS or upload failure must never
+    retrigger a reminder — log and move on."""
+    try:
+        audio = await asyncio.to_thread(voice.synthesize, spoken)
+        await bot.send_voice(chat_id, audio)
+    except Exception as exc:
+        print(f"Failed to send voice alert to {chat_id}: {exc}")
+
+
 async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
     """JobQueue callback. Sends each user one message combining any appointment reminders
     due today with the shopping lists, the latter only when its interval has elapsed."""
     now = datetime.now(timezone.utc)
     today = localtime.now_local().date()
     groceries_due = alert_due(now.isoformat())
+    sent = 0
+    digest_delivered = False
 
     for user in storage.get_all_users():
         user_id = user["telegram_user_id"]
@@ -127,43 +158,52 @@ async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
         upcoming = storage.get_upcoming_appointments(user_id, today.isoformat())
         due = due_reminders(upcoming, today)
 
-        sections = [section for section in (
-            format_appointment_reminder(due),
-            format_lists_for(user_id) if groceries_due else None,
-        ) if section]
-        if not sections:
+        composed = compose_reminder(user_id, user["first_name"], due, groceries_due)
+        if composed is None:
             continue
+        text, spoken, has_lists = composed
 
-        name = user["first_name"]
-        greeting = f"👋 Hola, {name}" if name else "👋 Hola"
-        message = "\n\n".join([greeting, *sections])
         try:
-            await context.bot.send_message(user["chat_id"], message)
+            await context.bot.send_message(user["chat_id"], text)
         except Exception as exc:  # one bad chat shouldn't stop the rest
             print(f"Failed to send alert to {user['chat_id']}: {exc}")
             continue  # not delivered, so leave the reminders unmarked to retry tomorrow
 
+        sent += 1
+        if has_lists:
+            digest_delivered = True
         for appointment, kind in due:
             storage.mark_appointment_reminded(appointment["id"], kind)
 
-        # Best effort: the text reminder is already delivered and marked, so a TTS or
-        # upload failure must never retrigger it — log and move on.
         if voice.is_configured():
-            spoken = " ".join(
-                [f"Hola, {name}." if name else "Hola."]
-                + [section for section in (
-                    spoken_appointment_reminder(due),
-                    spoken_shopping_lists(user_id) if groceries_due else None,
-                ) if section]
-            )
-            try:
-                audio = await asyncio.to_thread(voice.synthesize, spoken)
-                await context.bot.send_voice(user["chat_id"], audio)
-            except Exception as exc:
-                print(f"Failed to send voice alert to {user['chat_id']}: {exc}")
+            await _send_voice_note(context.bot, user["chat_id"], spoken)
 
-    if groceries_due:
+    # Only a digest that actually reached someone resets the interval clock; otherwise the
+    # next tick (e.g. right after items appear on a list) is free to send one.
+    if digest_delivered:
         storage.set_setting("last_alert_at", now.isoformat())
+    # A tick with nothing to say used to be indistinguishable from a tick that never ran.
+    print(
+        f"Alert tick at {now.isoformat()}: sent {sent} reminder(s), "
+        f"groceries_due={groceries_due}, digest_delivered={digest_delivered}"
+    )
+
+
+async def send_test_reminder(context, user_id: int, chat_id: int, name: str) -> bool:
+    """/alert test: send this admin their reminder as it stands right now, ignoring the
+    digest interval and the already-reminded flags, and marking nothing — so testing today
+    never swallows tomorrow's real reminder. False when there is nothing to show."""
+    today = localtime.now_local().date()
+    upcoming = storage.get_upcoming_appointments(user_id, today.isoformat())
+    fresh = [dict(a, reminded_day_before=0, reminded_same_day=0) for a in upcoming]
+    composed = compose_reminder(user_id, name, due_reminders(fresh, today), include_lists=True)
+    if composed is None:
+        return False
+    text, spoken, _ = composed
+    await context.bot.send_message(chat_id, text)
+    if voice.is_configured():
+        await _send_voice_note(context.bot, chat_id, spoken)
+    return True
 
 
 def alert_time() -> time:

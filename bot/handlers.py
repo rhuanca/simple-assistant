@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 from bot import voice
 from bot.agent import AgentError, clear_view_cache, run
-from bot.alerts import alert_time, schedule_alert_job
+from bot.alerts import alert_time, schedule_alert_job, send_test_reminder
 from bot.storage import (
     ADMIN_USER_ROLE,
     DEFAULT_USER_ROLE,
@@ -61,7 +61,7 @@ ADMIN_HELP = (
     "\n\n🔧 *Admin*\n"
     "/users — ver usuarios y roles\n"
     "/promote @usuario · /demote @usuario · /revoke @usuario\n"
-    "/alert on | off | every N — recordatorio de compras\n"
+    "/alert on | off | every N | test — recordatorio de compras\n"
     "/config — ver y cambiar la configuración\n"
     "/resetdb — reconstruir la base de datos"
 )
@@ -451,6 +451,17 @@ async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     sub = args[0].lower()
+    if sub == "test":
+        user_obj = update.effective_user
+        sent = await send_test_reminder(
+            context, user_obj.id, update.effective_chat.id, user_obj.first_name or ""
+        )
+        if not sent:
+            await update.message.reply_text(
+                "Nada que recordar ahora mismo: sin citas para hoy o mañana y con las "
+                "listas vacías."
+            )
+        return
     if sub == "on":
         set_setting("alert_enabled", "true")
     elif sub == "off":
@@ -458,6 +469,6 @@ async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif sub == "every" and len(args) >= 2 and args[1].isdigit() and int(args[1]) > 0:
         set_setting("alert_interval_days", args[1])
     else:
-        await update.message.reply_text("Uso: /alert [on|off|every <N>]")
+        await update.message.reply_text("Uso: /alert [on|off|every <N>|test]")
         return
     await update.message.reply_text(_alert_status())

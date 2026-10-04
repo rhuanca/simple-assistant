@@ -217,5 +217,88 @@ class AlertTickVoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["reminded_same_day"], 1)
 
 
+class DigestClockTests(unittest.IsolatedAsyncioTestCase):
+    """last_alert_at means "a digest reached someone", not "a tick happened while due" —
+    otherwise empty lists at 9:00 silence the digest for the whole interval."""
+
+    USER_ID = 1
+    CHAT_ID = 100
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._orig_db = storage.DB_PATH
+        storage.DB_PATH = Path(self._tmp.name) / "test.db"
+        self.addCleanup(lambda: setattr(storage, "DB_PATH", self._orig_db))
+        storage.init_db()
+        storage.upsert_user(self.USER_ID, self.CHAT_ID, "user", "Renan")
+
+    async def _tick(self, bot):
+        with mock.patch.object(alerts.voice, "is_configured", return_value=False):
+            await alerts.run_alert_tick(SimpleNamespace(bot=bot))
+
+    async def test_a_tick_with_empty_lists_does_not_reset_the_clock(self):
+        await self._tick(FakeBot())
+        self.assertEqual(storage.get_setting("last_alert_at"), "")
+
+    async def test_a_delivered_digest_resets_the_clock(self):
+        storage.add_item("leche", owner_user_id=self.USER_ID)
+        bot = FakeBot()
+        await self._tick(bot)
+
+        self.assertEqual(len(bot.messages), 1)
+        self.assertNotEqual(storage.get_setting("last_alert_at"), "")
+
+
+class SendTestReminderTests(unittest.IsolatedAsyncioTestCase):
+    """/alert test fires on demand, ignores the gates, and never consumes a real reminder."""
+
+    USER_ID = 1
+    CHAT_ID = 100
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._orig_db = storage.DB_PATH
+        storage.DB_PATH = Path(self._tmp.name) / "test.db"
+        self.addCleanup(lambda: setattr(storage, "DB_PATH", self._orig_db))
+        storage.init_db()
+        storage.upsert_user(self.USER_ID, self.CHAT_ID, "user", "Renan")
+
+    async def _test_reminder(self, bot):
+        with mock.patch.object(alerts.voice, "is_configured", return_value=False):
+            return await alerts.send_test_reminder(
+                SimpleNamespace(bot=bot), self.USER_ID, self.CHAT_ID, "Renan"
+            )
+
+    async def test_shows_appointments_even_when_already_reminded(self):
+        today = localtime.now_local().date()
+        appointment_id = storage.add_appointment("doctor", f"{today}T15:00", self.USER_ID)
+        storage.mark_appointment_reminded(appointment_id, "same_day")
+
+        bot = FakeBot()
+        self.assertTrue(await self._test_reminder(bot))
+        [(_, text)] = bot.messages
+        self.assertIn("doctor", text)
+        # Nothing was marked or reset by the test send.
+        self.assertEqual(storage.get_setting("last_alert_at"), "")
+
+    async def test_shows_the_lists_even_inside_the_digest_interval(self):
+        storage.set_setting("last_alert_at", datetime.now(timezone.utc).isoformat())
+        storage.add_item("leche", owner_user_id=self.USER_ID)
+
+        bot = FakeBot()
+        self.assertTrue(await self._test_reminder(bot))
+        [(_, text)] = bot.messages
+        self.assertIn("leche", text)
+        # The real interval clock is untouched by a test send.
+        self.assertNotEqual(storage.get_setting("last_alert_at"), "")
+
+    async def test_says_so_when_there_is_nothing_to_remind(self):
+        bot = FakeBot()
+        self.assertFalse(await self._test_reminder(bot))
+        self.assertEqual(bot.messages, [])
+
+
 if __name__ == "__main__":
     unittest.main()

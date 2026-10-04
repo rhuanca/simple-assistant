@@ -160,7 +160,14 @@ Admins control it with `/alert`:
 /alert                 show status
 /alert on | off        enable or disable the shopping digest
 /alert every 5         change the shopping interval to 5 days
+/alert test            send yourself the reminder right now
 ```
+
+`/alert test` is the way to check the reminder without waiting for the daily tick: it
+ignores the digest interval and the already-reminded flags, and marks nothing — so a test
+today never swallows tomorrow's real reminder. Note the daily reminder is quiet by design
+when there is nothing to say (no appointments today or tomorrow, shopping digest not due
+yet); every tick logs a summary line to the journal either way.
 
 Note `/alert` only governs the shopping digest; appointment reminders are always on.
 
