@@ -1,19 +1,17 @@
 # Grocery Bot
 
 A Telegram bot with two jobs: shopping lists and a personal appointment schedule.
-Understands natural language in English and Spanish, and always replies in the language you
-used. Backed by Gemini Flash.
+The interface is **Spanish-only**: all fixed copy, list output, reminders and commands are
+in Spanish (the agent still understands English input and will answer in English if you
+write it). Backed by Gemini Flash.
 
 ```
-Add milk and eggs                                  Comprar jabón y papel
-Show my list                                       Muéstrame la lista
-Remove milk        /  Borra el 2                   Quita el jabón
-Clear the list                                     Borra todo
+Agrega leche y huevos          Comprar jabón y papel
+Muéstrame la lista             Quita el jabón  /  Borra el 2
+Borra todo
 
-I have an appointment next Sunday at 3 with the doctor
 Tengo cita el próximo domingo a las 3 con el doctor
-What appointments do I have?                       ¿Qué citas tengo?
-Cancel the doctor one                              Cancela la segunda
+¿Qué citas tengo?              Cancela la segunda
 ```
 
 `/help` lists everything in chat — lists, appointments and reminders, plus the admin and
@@ -97,8 +95,9 @@ mis-transcription is obvious immediately:
 ```
 
 Transcription runs on your own OpenAI-compatible speech server
-([speaches](https://speaches.ai/)) — the audio never leaves your network. Configure it in
-`.env`:
+([speaches](https://speaches.ai/)) — the audio never leaves your network, and it is pinned
+to Spanish (`language="es"`), which noticeably helps the smaller Whisper models. Configure
+it in `.env`:
 
 ```
 SPEECH_API_URL=http://192.168.68.114:8000/v1
@@ -162,7 +161,7 @@ The first authenticated user is the admin and can promote others.
 | `/alert ...` | Shopping digest settings (above) |
 | `/config` | Show every setting and change it (below) |
 | `/resetdb` | Show what a reset would destroy |
-| `/resetdb CONFIRM` | Rebuild an empty database (see below) |
+| `/resetdb CONFIRMAR` | Rebuild an empty database (see below) |
 
 ## Settings
 
@@ -202,7 +201,7 @@ is just pulling the new code and restarting — existing items, users and author
 left untouched, and running it twice is a no-op. Migrations are positional and append-only:
 add to the end of `MIGRATIONS`, never reorder or remove entries.
 
-`/resetdb CONFIRM` moves the current database aside to a timestamped `.bak-` file and builds an
+`/resetdb CONFIRMAR` moves the current database aside to a timestamped `.bak-` file and builds an
 empty one. Every list, user and setting is destroyed; the admin who ran it stays authorized so
 they are not locked out, and everyone else must send the password again. Backup files are
 gitignored.
