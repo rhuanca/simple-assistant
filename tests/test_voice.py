@@ -83,6 +83,47 @@ class TranscribeTests(unittest.TestCase):
         self.assertEqual(result, "")
 
 
+class SynthesizeTests(unittest.TestCase):
+    def _synthesize(self, env: dict | None = None) -> tuple:
+        client = mock.Mock()
+        client.audio.speech.create.return_value = mock.Mock(content=b"mp3-bytes")
+        with mock.patch.dict(os.environ, env or {}):
+            with mock.patch.object(voice, "_get_client", return_value=client):
+                result = voice.synthesize("Recordatorio de citas")
+        return result, client.audio.speech.create
+
+    def test_sends_the_text_with_the_default_spanish_voice(self):
+        result, create = self._synthesize()
+        self.assertEqual(result, b"mp3-bytes")
+        create.assert_called_once_with(
+            model=voice.TTS_MODEL_DEFAULT,
+            voice=voice.TTS_VOICE_DEFAULT,
+            input="Recordatorio de citas",
+            response_format="mp3",
+        )
+
+    def test_model_and_voice_are_overridable_from_the_environment(self):
+        _, create = self._synthesize(
+            env={"SPEECH_TTS_MODEL": "other-model", "SPEECH_TTS_VOICE": "em_alex"}
+        )
+        self.assertEqual(create.call_args.kwargs["model"], "other-model")
+        self.assertEqual(create.call_args.kwargs["voice"], "em_alex")
+
+
+class SpeakableTests(unittest.TestCase):
+    def test_strips_emoji_and_tidies_whitespace(self):
+        text = "📅 Recordatorio de citas\n\nHoy:\n• dom 16 ago 2026, 15:00 — doctor"
+        self.assertEqual(
+            voice.speakable(text),
+            "Recordatorio de citas\n\nHoy:\n• dom 16 ago 2026, 15:00 — doctor",
+        )
+
+    def test_shopping_header_loses_the_cart(self):
+        self.assertEqual(
+            voice.speakable("🛒 Mi lista — 2 artículos"), "Mi lista — 2 artículos"
+        )
+
+
 class TranscriptEchoTests(unittest.TestCase):
     def test_reply_prefix_shows_what_was_heard(self):
         self.assertEqual(

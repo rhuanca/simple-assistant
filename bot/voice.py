@@ -1,15 +1,19 @@
-"""Speech-to-text via the user's own OpenAI-compatible speech server (speaches).
+"""Speech-to-text and text-to-speech via the user's own OpenAI-compatible speech server
+(speaches).
 
-The audio of a voice note travels only to that LAN server, configured by SPEECH_API_URL.
-Voice is optional: without SPEECH_API_URL the bot runs fine and voice notes get a
-"not set up" reply instead of an error.
+Audio travels only to that LAN server, configured by SPEECH_API_URL. Voice is optional:
+without SPEECH_API_URL the bot runs fine — voice notes get a "not set up" reply and the
+daily reminder is text only.
 """
 
 import os
+import re
 
 from openai import OpenAI
 
 STT_MODEL_DEFAULT = "Systran/faster-whisper-tiny"
+TTS_MODEL_DEFAULT = "speaches-ai/Kokoro-82M-v1.0-ONNX"
+TTS_VOICE_DEFAULT = "ef_dora"  # Kokoro's Spanish voices: ef_dora, em_alex, em_santa
 
 _client = None
 
@@ -36,3 +40,25 @@ def transcribe(audio: bytes, filename: str = "voice.ogg") -> str:
         language="es",
     )
     return result.text.strip()
+
+
+# Emoji and symbol ranges that a TTS voice would either skip or read out loud ("carrito de
+# compras"); the reminder text is full of them.
+_UNSPEAKABLE = re.compile(r"[☀-➿️\U0001F000-\U0001FAFF]")
+
+
+def speakable(text: str) -> str:
+    """Strip emoji and tidy the leftover whitespace so the text reads well aloud."""
+    lines = (_UNSPEAKABLE.sub("", line).strip() for line in text.splitlines())
+    return "\n".join(lines).strip()
+
+
+def synthesize(text: str) -> bytes:
+    """Render `text` as MP3 speech. Blocking — call via asyncio.to_thread."""
+    response = _get_client().audio.speech.create(
+        model=os.getenv("SPEECH_TTS_MODEL", TTS_MODEL_DEFAULT),
+        voice=os.getenv("SPEECH_TTS_VOICE", TTS_VOICE_DEFAULT),
+        input=text,
+        response_format="mp3",  # Telegram's send_voice accepts mp3 directly
+    )
+    return response.content

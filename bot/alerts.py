@@ -8,11 +8,12 @@ Keeping the "am I due?" decisions in the DB (rather than an in-memory timer) mea
 Raspberry-Pi reboot never loses the schedule — the next daily tick simply re-evaluates.
 """
 
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 
 from telegram.ext import ContextTypes
 
-from bot import localtime, storage
+from bot import localtime, storage, voice
 from bot.agent import format_lists_for
 
 # The job is named so it can be found and replaced when the schedule settings change.
@@ -88,14 +89,24 @@ async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not sections:
             continue
 
+        message = "\n\n".join(sections)
         try:
-            await context.bot.send_message(user["chat_id"], "\n\n".join(sections))
+            await context.bot.send_message(user["chat_id"], message)
         except Exception as exc:  # one bad chat shouldn't stop the rest
             print(f"Failed to send alert to {user['chat_id']}: {exc}")
             continue  # not delivered, so leave the reminders unmarked to retry tomorrow
 
         for appointment, kind in due:
             storage.mark_appointment_reminded(appointment["id"], kind)
+
+        # Best effort: the text reminder is already delivered and marked, so a TTS or
+        # upload failure must never retrigger it — log and move on.
+        if voice.is_configured():
+            try:
+                audio = await asyncio.to_thread(voice.synthesize, voice.speakable(message))
+                await context.bot.send_voice(user["chat_id"], audio)
+            except Exception as exc:
+                print(f"Failed to send voice alert to {user['chat_id']}: {exc}")
 
     if groceries_due:
         storage.set_setting("last_alert_at", now.isoformat())
