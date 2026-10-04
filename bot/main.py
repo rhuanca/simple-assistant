@@ -11,6 +11,7 @@ from bot.handlers import (
     handle_message,
     handle_voice,
     help_command,
+    on_error,
     promote_command,
     resetdb_command,
     revoke_command,
@@ -52,6 +53,7 @@ def main():
     app.add_handler(CommandHandler("resetdb", resetdb_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_error_handler(on_error)
 
     # Daily tick for appointment reminders, which also carries the shopping list when its
     # interval has elapsed (see bot/alerts.py). The hour is LOCAL: "the morning of" only

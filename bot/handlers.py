@@ -1,9 +1,11 @@
 import asyncio
 import os
+import traceback
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from telegram import Update
 from telegram.constants import ParseMode
+from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
 from bot import voice
@@ -206,6 +208,25 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(VOICE_NOT_UNDERSTOOD)
         return
     await _run_and_reply(update, context, text, prefix=format_transcript(text))
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """PTB's global error handler. Known transient noise becomes one journal line instead
+    of a 40-line traceback every few seconds (the Pi's journald is size-capped); anything
+    unexpected still logs in full."""
+    error = context.error
+    if isinstance(error, Conflict):
+        print(
+            "Telegram Conflict: another instance is polling with this bot token — "
+            "find and stop the duplicate (pgrep -af bot.main)."
+        )
+        return
+    if isinstance(error, (TimedOut, NetworkError)):
+        print(f"Telegram network hiccup (will retry): {error}")
+        return
+    print(f"Unhandled error: {error!r}")
+    if error is not None:
+        traceback.print_exception(type(error), error, error.__traceback__)
 
 
 async def _notify_admins(context: ContextTypes.DEFAULT_TYPE, message: str) -> None:

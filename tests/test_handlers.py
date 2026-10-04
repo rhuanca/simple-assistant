@@ -1,5 +1,10 @@
 import asyncio
+import contextlib
+import io
 import unittest
+from types import SimpleNamespace
+
+from telegram.error import Conflict, TimedOut
 
 from bot import handlers
 
@@ -44,6 +49,33 @@ class WithTypingTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(RuntimeError):
             await handlers._with_typing(chat, boom())
+
+
+class ErrorHandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def _handle(self, error) -> str:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await handlers.on_error(None, SimpleNamespace(error=error))
+        return out.getvalue()
+
+    async def test_conflict_collapses_to_one_pointed_line(self):
+        logged = await self._handle(Conflict("terminated by other getUpdates request"))
+        self.assertIn("another instance is polling", logged)
+        self.assertNotIn("Traceback", logged)
+        self.assertEqual(len(logged.strip().splitlines()), 1)
+
+    async def test_timeouts_collapse_to_one_line(self):
+        logged = await self._handle(TimedOut())
+        self.assertIn("network hiccup", logged)
+        self.assertEqual(len(logged.strip().splitlines()), 1)
+
+    async def test_unexpected_errors_keep_the_full_traceback(self):
+        try:
+            raise RuntimeError("something real broke")
+        except RuntimeError as exc:
+            error = exc
+        logged = await self._handle(error)
+        self.assertIn("something real broke", logged)
 
 
 if __name__ == "__main__":
