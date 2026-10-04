@@ -69,6 +69,51 @@ def format_appointment_reminder(due: list[tuple[dict, str]]) -> str | None:
     return "\n\n".join(blocks)
 
 
+# --- Spoken script ----------------------------------------------------------
+# The voice note gets its own rendition of the reminder: the written layout (row numbers,
+# item counts, full dates, "15:00") is exactly what sounds robotic read aloud.
+
+
+def _join_spoken(parts: list[str]) -> str:
+    """Join items the way a sentence would: "leche, pan y huevos"."""
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " y " + parts[-1]
+
+
+def spoken_appointment_reminder(due: list[tuple[dict, str]]) -> str | None:
+    """The appointment reminder said aloud: just "hoy"/"mañana", the title, and the time
+    in words — the date itself is redundant when you already said "hoy"."""
+    if not due:
+        return None
+    phrases = []
+    for day_word, appointments in (
+        ("Hoy", [a for a, kind in due if kind == "same_day"]),
+        ("Mañana", [a for a, kind in due if kind == "day_before"]),
+    ):
+        if not appointments:
+            continue
+        noun = "una cita" if len(appointments) == 1 else "citas"
+        told = _join_spoken(
+            [f"{a['title']}, {localtime.format_spoken(a['starts_at'])}" for a in appointments]
+        )
+        phrases.append(f"{day_word} tienes {noun}: {told}.")
+    return " ".join(phrases)
+
+
+def spoken_shopping_lists(user_id: int) -> str | None:
+    """The shopping lists said aloud: items joined naturally, no numbers, no counts, and
+    empty lists simply not mentioned. None when there is nothing to say."""
+    personal = [item["item_text"] for item in storage.get_items(user_id)]
+    common = [item["item_text"] for item in storage.get_items(None)]
+    phrases = []
+    if personal:
+        phrases.append(f"En tu lista de compras tienes: {_join_spoken(personal)}.")
+    if common:
+        phrases.append(f"En la lista común hay: {_join_spoken(common)}.")
+    return " ".join(phrases) or None
+
+
 async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
     """JobQueue callback. Sends each user one message combining any appointment reminders
     due today with the shopping lists, the latter only when its interval has elapsed."""
@@ -104,8 +149,15 @@ async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
         # Best effort: the text reminder is already delivered and marked, so a TTS or
         # upload failure must never retrigger it — log and move on.
         if voice.is_configured():
+            spoken = " ".join(
+                [f"Hola, {name}." if name else "Hola."]
+                + [section for section in (
+                    spoken_appointment_reminder(due),
+                    spoken_shopping_lists(user_id) if groceries_due else None,
+                ) if section]
+            )
             try:
-                audio = await asyncio.to_thread(voice.synthesize, voice.speakable(message))
+                audio = await asyncio.to_thread(voice.synthesize, spoken)
                 await context.bot.send_voice(user["chat_id"], audio)
             except Exception as exc:
                 print(f"Failed to send voice alert to {user['chat_id']}: {exc}")

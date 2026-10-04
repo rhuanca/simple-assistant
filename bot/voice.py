@@ -7,7 +7,6 @@ daily reminder is text only.
 """
 
 import os
-import re
 
 from openai import OpenAI
 
@@ -40,17 +39,6 @@ def transcribe(audio: bytes, filename: str = "voice.ogg") -> str:
         language="es",
     )
     return result.text.strip()
-
-
-# Emoji and symbol ranges that a TTS voice would either skip or read out loud ("carrito de
-# compras"); the reminder text is full of them.
-_UNSPEAKABLE = re.compile(r"[☀-➿️\U0001F000-\U0001FAFF]")
-
-
-def speakable(text: str) -> str:
-    """Strip emoji and tidy the leftover whitespace so the text reads well aloud."""
-    lines = (_UNSPEAKABLE.sub("", line).strip() for line in text.splitlines())
-    return "\n".join(lines).strip()
 
 
 def synthesize(text: str) -> bytes:

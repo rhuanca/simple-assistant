@@ -106,10 +106,16 @@ SPEECH_TTS_MODEL=speaches-ai/Kokoro-82M-v1.0-ONNX    # optional, this is the def
 SPEECH_TTS_VOICE=ef_dora                             # optional; a Spanish Kokoro voice
 ```
 
-With `SPEECH_API_URL` set, the daily reminder also arrives as a **voice note**: the same
-text, synthesized by Kokoro on your server and sent right after the text message. It is
-best-effort — if TTS fails, the text reminder still goes out, and the failure is only
-logged. Kokoro's Spanish voices are `ef_dora`, `em_alex` and `em_santa`.
+With `SPEECH_API_URL` set, the daily reminder also arrives as a **voice note**, sent right
+after the text message. The audio is not the written text read verbatim — it gets its own
+conversational script, because row numbers, item counts and "15:00"-style times sound
+robotic aloud:
+
+> «Hola, Renan. Hoy tienes una cita: doctor, a las 3 de la tarde. En tu lista de compras
+> tienes: leche, pan y huevos.»
+
+It is best-effort — if TTS fails, the text reminder still goes out, and the failure is
+only logged. Kokoro's Spanish voices are `ef_dora`, `em_alex` and `em_santa`.
 
 Voice is optional: without `SPEECH_API_URL` the bot runs normally and answers voice notes
 with "not set up". `faster-whisper-tiny` is fast but rough, especially on Spanish — if

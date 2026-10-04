@@ -110,20 +110,6 @@ class SynthesizeTests(unittest.TestCase):
         self.assertEqual(create.call_args.kwargs["voice"], "em_alex")
 
 
-class SpeakableTests(unittest.TestCase):
-    def test_strips_emoji_and_tidies_whitespace(self):
-        text = "📅 Recordatorio de citas\n\nHoy:\n• dom 16 ago 2026, 15:00 — doctor"
-        self.assertEqual(
-            voice.speakable(text),
-            "Recordatorio de citas\n\nHoy:\n• dom 16 ago 2026, 15:00 — doctor",
-        )
-
-    def test_shopping_header_loses_the_cart(self):
-        self.assertEqual(
-            voice.speakable("🛒 Mi lista — 2 artículos"), "Mi lista — 2 artículos"
-        )
-
-
 class TranscriptEchoTests(unittest.TestCase):
     def test_reply_prefix_shows_what_was_heard(self):
         self.assertEqual(

@@ -91,6 +91,18 @@ class LocalTimeTests(AppointmentTestCase):
         self.assertEqual(localtime.format_local("2026-08-16T15:00"), "dom 16 ago 2026, 15:00")
         self.assertEqual(localtime.format_local("2026-01-05T09:30"), "lun 05 ene 2026, 09:30")
 
+    def test_spoken_format_reads_like_speech(self):
+        """"15:00" sounds robotic through TTS; aloud it must be "a las 3 de la tarde"."""
+        for stored, spoken in (
+            ("2026-08-16T15:00", "a las 3 de la tarde"),
+            ("2026-08-16T09:15", "a las 9 y cuarto de la mañana"),
+            ("2026-08-16T13:30", "a la 1 y media de la tarde"),
+            ("2026-08-16T20:45", "a las 8 y 45 de la noche"),
+            ("2026-08-16T00:05", "a las 12 y 5 de la madrugada"),
+            ("2026-08-16T12:00", "a las 12 de la tarde"),
+        ):
+            self.assertEqual(localtime.format_spoken(stored), spoken)
+
     def test_to_storage_drops_seconds(self):
         self.assertEqual(
             localtime.to_storage(localtime.parse_local("2026-08-16T15:00:42")),

@@ -51,6 +51,90 @@ class AlertDueTests(unittest.TestCase):
         self.assertTrue(alerts.alert_due(self.now.isoformat()))
 
 
+class SpokenAppointmentTests(unittest.TestCase):
+    """What sounded robotic read aloud: full dates, row numbers, "15:00". The spoken
+    script must carry the same information without any of that."""
+
+    def _due(self, *pairs):
+        return [({"title": title, "starts_at": starts_at}, kind)
+                for title, starts_at, kind in pairs]
+
+    def test_nothing_due_says_nothing(self):
+        self.assertIsNone(alerts.spoken_appointment_reminder([]))
+
+    def test_one_appointment_today(self):
+        due = self._due(("doctor", "2026-08-16T15:00", "same_day"))
+        self.assertEqual(
+            alerts.spoken_appointment_reminder(due),
+            "Hoy tienes una cita: doctor, a las 3 de la tarde.",
+        )
+
+    def test_today_and_tomorrow_read_as_separate_sentences(self):
+        due = self._due(
+            ("doctor", "2026-08-16T15:00", "same_day"),
+            ("dentista", "2026-08-17T09:00", "day_before"),
+        )
+        self.assertEqual(
+            alerts.spoken_appointment_reminder(due),
+            "Hoy tienes una cita: doctor, a las 3 de la tarde. "
+            "Mañana tienes una cita: dentista, a las 9 de la mañana.",
+        )
+
+    def test_several_on_the_same_day_are_joined_with_y(self):
+        due = self._due(
+            ("doctor", "2026-08-16T15:00", "same_day"),
+            ("dentista", "2026-08-16T17:30", "same_day"),
+        )
+        self.assertEqual(
+            alerts.spoken_appointment_reminder(due),
+            "Hoy tienes citas: doctor, a las 3 de la tarde y dentista, a las 5 y media de la tarde.",
+        )
+
+    def test_never_speaks_clock_digits_or_dates(self):
+        due = self._due(("doctor", "2026-08-16T15:00", "same_day"))
+        spoken = alerts.spoken_appointment_reminder(due)
+        self.assertNotIn("15:00", spoken)
+        self.assertNotIn("2026", spoken)
+
+
+class SpokenListsTests(unittest.TestCase):
+    USER_ID = 7
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._orig_db = storage.DB_PATH
+        storage.DB_PATH = Path(self._tmp.name) / "test.db"
+        self.addCleanup(lambda: setattr(storage, "DB_PATH", self._orig_db))
+        storage.init_db()
+
+    def test_items_are_joined_naturally_without_numbers_or_counts(self):
+        for item in ("leche", "pan", "huevos"):
+            storage.add_item(item, owner_user_id=self.USER_ID)
+        self.assertEqual(
+            alerts.spoken_shopping_lists(self.USER_ID),
+            "En tu lista de compras tienes: leche, pan y huevos.",
+        )
+
+    def test_an_empty_list_is_simply_not_mentioned(self):
+        storage.add_item("jabón", owner_user_id=None)
+        self.assertEqual(
+            alerts.spoken_shopping_lists(self.USER_ID),
+            "En la lista común hay: jabón.",
+        )
+
+    def test_both_lists_when_both_have_items(self):
+        storage.add_item("leche", owner_user_id=self.USER_ID)
+        storage.add_item("jabón", owner_user_id=None)
+        self.assertEqual(
+            alerts.spoken_shopping_lists(self.USER_ID),
+            "En tu lista de compras tienes: leche. En la lista común hay: jabón.",
+        )
+
+    def test_nothing_anywhere_says_nothing(self):
+        self.assertIsNone(alerts.spoken_shopping_lists(self.USER_ID))
+
+
 class FakeBot:
     def __init__(self, fail_voice=False):
         self.messages = []
@@ -82,7 +166,7 @@ class AlertTickVoiceTests(unittest.IsolatedAsyncioTestCase):
 
         storage.upsert_user(self.USER_ID, self.CHAT_ID, "user", "Renan")
         today = localtime.now_local().date()
-        self.appointment_id = storage.add_appointment("doctor", f"{today}T23:59", self.USER_ID)
+        self.appointment_id = storage.add_appointment("doctor", f"{today}T15:00", self.USER_ID)
 
     async def _tick(self, bot, configured=True, synthesize=None):
         synthesize = synthesize or mock.Mock(return_value=b"mp3-bytes")
@@ -100,11 +184,11 @@ class AlertTickVoiceTests(unittest.IsolatedAsyncioTestCase):
         # The reminder greets the person by name.
         [(_, text)] = bot.messages
         self.assertTrue(text.startswith("👋 Hola, Renan\n\n"), text)
-        # The spoken text is the same reminder, minus emoji.
+        # The voice note speaks its own conversational script, not the written layout.
         spoken = synthesize.call_args.args[0]
-        self.assertTrue(spoken.startswith("Hola, Renan"), spoken)
-        self.assertIn("Recordatorio de citas", spoken)
-        self.assertNotIn("📅", spoken)
+        self.assertEqual(
+            spoken, "Hola, Renan. Hoy tienes una cita: doctor, a las 3 de la tarde."
+        )
 
     async def test_greets_without_a_name_when_none_is_stored(self):
         storage.upsert_user(self.USER_ID, self.CHAT_ID, "user", "")

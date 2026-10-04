@@ -54,3 +54,29 @@ def format_local(value: str | datetime) -> str:
     day = DAY_NAMES[moment.weekday()]
     month = MONTH_NAMES[moment.month - 1]
     return f"{day} {moment.day:02d} {month} {moment.year}, {moment:%H:%M}"
+
+
+def format_spoken(value: str | datetime) -> str:
+    """The time as it would be said aloud — "a las 3 y media de la tarde" — for TTS.
+    24-hour "15:00" comes out robotic when spoken; digits like "3 y 45" read naturally."""
+    moment = parse_local(value) if isinstance(value, str) else value
+    hour, minute = moment.hour, moment.minute
+    if hour < 6:
+        period = "de la madrugada"
+    elif hour < 12:
+        period = "de la mañana"
+    elif hour < 19:
+        period = "de la tarde"
+    else:
+        period = "de la noche"
+    h12 = hour % 12 or 12
+    if minute == 0:
+        clock = f"{h12}"
+    elif minute == 15:
+        clock = f"{h12} y cuarto"
+    elif minute == 30:
+        clock = f"{h12} y media"
+    else:
+        clock = f"{h12} y {minute}"
+    article = "a la" if h12 == 1 else "a las"
+    return f"{article} {clock} {period}"
