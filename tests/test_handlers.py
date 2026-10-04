@@ -130,6 +130,82 @@ class VoiceReplyTests(unittest.IsolatedAsyncioTestCase):
         synthesize.assert_not_called()
 
 
+class _StatusMessage:
+    """The placeholder the voice handler sends and then edits in place."""
+
+    def __init__(self):
+        self.edits = []
+
+    async def edit_text(self, text, **kwargs):
+        self.edits.append(text)
+
+
+class _VoiceUserMessage:
+    def __init__(self):
+        self.replies = []
+        self.status = _StatusMessage()
+        file = SimpleNamespace(
+            download_as_bytearray=mock.AsyncMock(return_value=bytearray(b"OggS"))
+        )
+        self.voice = SimpleNamespace(get_file=mock.AsyncMock(return_value=file))
+
+    async def reply_text(self, text, **kwargs):
+        self.replies.append(text)
+        return self.status
+
+
+class VoiceStagedStatusTests(unittest.IsolatedAsyncioTestCase):
+    """A voice note gets one placeholder message that morphs: Escuchando → transcript +
+    Pensando → the answer. The user always sees progress in the chat body."""
+
+    CHAT_ID = 100
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._orig_db = storage.DB_PATH
+        storage.DB_PATH = Path(self._tmp.name) / "test.db"
+        self.addCleanup(lambda: setattr(storage, "DB_PATH", self._orig_db))
+        storage.init_db()
+        storage.allow_chat(self.CHAT_ID)
+
+    async def _handle(self, transcribe):
+        update = SimpleNamespace(
+            effective_chat=_ReplyChat(self.CHAT_ID),
+            effective_user=SimpleNamespace(id=1, first_name="Renan"),
+            message=_VoiceUserMessage(),
+        )
+        context = SimpleNamespace(bot=_VoiceBot())
+
+        async def fake_run(text, user="", user_id=None):
+            return "✅ Agregado a tu lista: leche"
+
+        with mock.patch.object(handlers, "run", fake_run):
+            with mock.patch.object(handlers.voice, "is_configured", return_value=True):
+                with mock.patch.object(handlers.voice, "transcribe", transcribe):
+                    await handlers.handle_voice(update, context)
+        return update
+
+    async def test_placeholder_morphs_through_the_stages_into_the_answer(self):
+        update = await self._handle(mock.Mock(return_value="agrega leche"))
+
+        self.assertEqual(update.message.replies, [handlers.VOICE_LISTENING])
+        self.assertEqual(update.message.status.edits, [
+            "🎤 «agrega leche»\n\n" + handlers.VOICE_THINKING,
+            "🎤 «agrega leche»\n\n✅ Agregado a tu lista: leche",
+        ])
+
+    async def test_transcription_failure_morphs_into_the_error(self):
+        update = await self._handle(mock.Mock(side_effect=RuntimeError("stt down")))
+
+        self.assertEqual(update.message.replies, [handlers.VOICE_LISTENING])
+        self.assertEqual(update.message.status.edits, [handlers.VOICE_FAILED])
+
+    async def test_silence_morphs_into_not_understood(self):
+        update = await self._handle(mock.Mock(return_value=""))
+        self.assertEqual(update.message.status.edits, [handlers.VOICE_NOT_UNDERSTOOD])
+
+
 class ErrorHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def _handle(self, error) -> str:
         out = io.StringIO()

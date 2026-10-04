@@ -143,10 +143,13 @@ async def _with_typing(chat, coro, refresh: float = _TYPING_REFRESH_SECONDS):
 
 
 async def _run_and_reply(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, prefix: str = ""
+    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, prefix: str = "",
+    status=None,
 ) -> None:
     """Send `text` through the agent and reply, never leaving the user without an answer.
-    `prefix` is prepended to the reply (the voice handler uses it to echo the transcript)."""
+    `prefix` is prepended to the reply (the voice handler uses it to echo the transcript).
+    With `status` (a previously sent placeholder message), the reply edits that message in
+    place instead of sending a new one."""
     chat_id = update.effective_chat.id
     user_obj = update.effective_user
     user_id = user_obj.id if user_obj else 0
@@ -163,7 +166,10 @@ async def _run_and_reply(
         # Never leave the user without a reply.
         reply = "Algo salió mal de mi lado. Inténtalo de nuevo."
         await _notify_admins(context, f"⚠️ Error del bot de {first_name} (chat {chat_id}):\n{exc!r}")
-    await update.message.reply_text(prefix + reply)
+    if status is not None:
+        await status.edit_text(prefix + reply)
+    else:
+        await update.message.reply_text(prefix + reply)
 
     # Optional voice reply (the `voice_replies` setting, off by default). Only the reply is
     # spoken, not the echoed transcript — the user just said that part themselves.
@@ -176,6 +182,10 @@ async def _run_and_reply(
 VOICE_NOT_CONFIGURED = "🎤 Los mensajes de voz no están configurados en este bot."
 VOICE_NOT_UNDERSTOOD = "🎤 No entendí nada — inténtalo de nuevo."
 VOICE_FAILED = "🎤 No pude procesar ese mensaje de voz. Inténtalo de nuevo o escríbelo."
+# Staged status: one placeholder message that morphs into the answer, so the user sees
+# progress in the chat body — the header's typing dots are too easy to miss.
+VOICE_LISTENING = "🎧 Escuchando tu audio…"
+VOICE_THINKING = "🤖 Pensando…"
 
 
 def format_transcript(transcript: str) -> str:
@@ -198,10 +208,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # The speech client is sync; a thread keeps transcription off the event loop.
         return await asyncio.to_thread(voice.transcribe, audio)
 
+    status = await update.message.reply_text(VOICE_LISTENING)
     try:
         text = await _with_typing(update.effective_chat, fetch_and_transcribe())
     except Exception as exc:
-        await update.message.reply_text(VOICE_FAILED)
+        await status.edit_text(VOICE_FAILED)
         user_obj = update.effective_user
         first_name = user_obj.first_name if user_obj and user_obj.first_name else "Alguien"
         await _notify_admins(
@@ -212,9 +223,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not text:
-        await update.message.reply_text(VOICE_NOT_UNDERSTOOD)
+        await status.edit_text(VOICE_NOT_UNDERSTOOD)
         return
-    await _run_and_reply(update, context, text, prefix=format_transcript(text))
+    await status.edit_text(format_transcript(text) + VOICE_THINKING)
+    await _run_and_reply(update, context, text, prefix=format_transcript(text), status=status)
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
