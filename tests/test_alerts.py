@@ -97,10 +97,22 @@ class AlertTickVoiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(bot.messages), 1)
         self.assertEqual(bot.voices, [(self.CHAT_ID, b"mp3-bytes")])
+        # The reminder greets the person by name.
+        [(_, text)] = bot.messages
+        self.assertTrue(text.startswith("👋 Hola, Renan\n\n"), text)
         # The spoken text is the same reminder, minus emoji.
         spoken = synthesize.call_args.args[0]
+        self.assertTrue(spoken.startswith("Hola, Renan"), spoken)
         self.assertIn("Recordatorio de citas", spoken)
         self.assertNotIn("📅", spoken)
+
+    async def test_greets_without_a_name_when_none_is_stored(self):
+        storage.upsert_user(self.USER_ID, self.CHAT_ID, "user", "")
+        bot = FakeBot()
+        await self._tick(bot, configured=False)
+
+        [(_, text)] = bot.messages
+        self.assertTrue(text.startswith("👋 Hola\n\n"), text)
 
     async def test_without_a_speech_server_only_text_goes_out(self):
         bot = FakeBot()

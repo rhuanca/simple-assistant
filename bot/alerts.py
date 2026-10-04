@@ -89,7 +89,9 @@ async def run_alert_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not sections:
             continue
 
-        message = "\n\n".join(sections)
+        name = user["first_name"]
+        greeting = f"👋 Hola, {name}" if name else "👋 Hola"
+        message = "\n\n".join([greeting, *sections])
         try:
             await context.bot.send_message(user["chat_id"], message)
         except Exception as exc:  # one bad chat shouldn't stop the rest

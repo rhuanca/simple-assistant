@@ -138,7 +138,8 @@ To cancel, name it ("cancela la del doctor") or point at a row from the list ("l
 
 ## Reminders
 
-One scheduled DM per user, once a day, containing whichever sections apply:
+One scheduled DM per user, once a day, greeting them by name and containing whichever
+sections apply:
 
 - **Appointments** — the day before, and the morning of.
 - **Shopping lists** — only when the configured interval has elapsed (default: every 3 days).
