@@ -29,45 +29,41 @@ from bot.storage import (
     upsert_user,
 )
 
-AUTH_PROMPT = "🔒 Send the password to use this bot.\n🔒 Envía la contraseña para usar este bot."
+AUTH_PROMPT = "🔒 Envía la contraseña para usar este bot."
 
 WELCOME = (
     "🛒 *Grocery Bot*\n\n"
-    "I keep your shopping lists and your appointments.\n"
     "Llevo tus listas de compras y tus citas.\n\n"
-    "Send /help to see everything I can do.\n"
     "Envía /help para ver todo lo que puedo hacer."
 )
 
 # Kept free of _ and [ ] so it survives Telegram's legacy Markdown unescaped.
 HELP = (
-    "🛒 *Lists / Listas*\n"
-    '• "Add milk and eggs" / "Comprar jabón y papel"\n'
-    '• "Show my list" / "Muéstrame mi lista"\n'
-    '• "Remove milk" / "Quita el jabón" / "Borra el 2"\n'
-    '• "Clear the list" / "Borra todo"\n'
-    'Your list is private. Say "the common list" / "la lista de la casa" for the shared one.\n\n'
-    "📅 *Appointments / Citas*\n"
-    '• "I have an appointment next Sunday at 3 with the doctor"\n'
+    "🛒 *Listas*\n"
+    '• "Agrega leche y huevos" / "Comprar jabón y papel"\n'
+    '• "Muéstrame mi lista"\n'
+    '• "Quita el jabón" / "Borra el 2"\n'
+    '• "Borra todo"\n'
+    'Tu lista es privada. Di "la lista común" o "la lista de la casa" para la compartida.\n\n'
+    "📅 *Citas*\n"
     '• "Tengo cita el próximo domingo a las 3 con el doctor"\n'
-    '• "What appointments do I have?" / "¿Qué citas tengo?"\n'
-    '• "Cancel the doctor one" / "Cancela la segunda"\n'
-    "Appointments are personal. If you don't give a time, I ask before saving anything.\n\n"
-    "🎤 *Voice / Voz*\n"
-    "Send a voice note and I'll do the same things. I show you what I heard.\n"
+    '• "¿Qué citas tengo?"\n'
+    '• "Cancela la del doctor" / "Cancela la segunda"\n'
+    "Las citas son personales. Si no me das la hora, pregunto antes de guardar nada.\n\n"
+    "🎤 *Voz*\n"
     "Envíame una nota de voz y hago lo mismo. Te muestro lo que entendí.\n\n"
-    "⏰ *Reminders / Recordatorios*\n"
-    "One message a day: appointments the day before and the morning of, plus your lists "
-    "every few days."
+    "⏰ *Recordatorios*\n"
+    "Un mensaje al día: las citas el día anterior y la mañana del día, más tus listas "
+    "cada pocos días."
 )
 
 ADMIN_HELP = (
     "\n\n🔧 *Admin*\n"
-    "/users — list users and roles\n"
-    "/promote @user · /demote @user · /revoke @user\n"
-    "/alert on | off | every N — shopping digest\n"
-    "/config — view and change settings\n"
-    "/resetdb — rebuild the database"
+    "/users — ver usuarios y roles\n"
+    "/promote @usuario · /demote @usuario · /revoke @usuario\n"
+    "/alert on | off | every N — recordatorio de compras\n"
+    "/config — ver y cambiar la configuración\n"
+    "/resetdb — reconstruir la base de datos"
 )
 
 
@@ -104,7 +100,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_obj = update.effective_user
     user_id = user_obj.id if user_obj else 0
     username = user_obj.username if user_obj and user_obj.username else ""
-    first_name = user_obj.first_name if user_obj and user_obj.first_name else "Someone"
+    first_name = user_obj.first_name if user_obj and user_obj.first_name else "Alguien"
 
     if not is_chat_allowed(chat_id):
         if text.strip() == os.getenv("BOT_PASSWORD", ""):
@@ -118,9 +114,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             if is_first_user:
                 promote_to_admin(user_id)
-            await update.message.reply_text("✅ Authenticated! / ¡Autenticado!\n\n" + WELCOME, parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text("✅ ¡Autenticado!\n\n" + WELCOME, parse_mode=ParseMode.MARKDOWN)
         else:
-            await update.message.reply_text("❌ Wrong password. / Contraseña incorrecta.")
+            await update.message.reply_text("❌ Contraseña incorrecta.")
         return
 
     await _run_and_reply(update, context, text)
@@ -134,33 +130,24 @@ async def _run_and_reply(
     chat_id = update.effective_chat.id
     user_obj = update.effective_user
     user_id = user_obj.id if user_obj else 0
-    first_name = user_obj.first_name if user_obj and user_obj.first_name else "Someone"
+    first_name = user_obj.first_name if user_obj and user_obj.first_name else "Alguien"
 
     await update.effective_chat.send_action("typing")
     try:
         reply = await run(text, user=first_name, user_id=user_id)
     except AgentError as exc:
         reply = exc.user_message
-        await _notify_admins(context, f"⚠️ Bot error from {first_name} (chat {chat_id}):\n{exc.admin_detail}")
+        await _notify_admins(context, f"⚠️ Error del bot de {first_name} (chat {chat_id}):\n{exc.admin_detail}")
     except Exception as exc:
         # Never leave the user without a reply.
-        reply = "Something went wrong on my side. Please try again. / Algo salió mal, inténtalo de nuevo."
-        await _notify_admins(context, f"⚠️ Bot error from {first_name} (chat {chat_id}):\n{exc!r}")
+        reply = "Algo salió mal de mi lado. Inténtalo de nuevo."
+        await _notify_admins(context, f"⚠️ Error del bot de {first_name} (chat {chat_id}):\n{exc!r}")
     await update.message.reply_text(prefix + reply)
 
 
-VOICE_NOT_CONFIGURED = (
-    "🎤 Voice messages are not set up on this bot.\n"
-    "🎤 Los mensajes de voz no están configurados en este bot."
-)
-VOICE_NOT_UNDERSTOOD = (
-    "🎤 I couldn't make out any words — please try again.\n"
-    "🎤 No entendí nada — inténtalo de nuevo."
-)
-VOICE_FAILED = (
-    "🎤 I couldn't process that voice message. Please try again or type it.\n"
-    "🎤 No pude procesar ese mensaje de voz. Inténtalo de nuevo o escríbelo."
-)
+VOICE_NOT_CONFIGURED = "🎤 Los mensajes de voz no están configurados en este bot."
+VOICE_NOT_UNDERSTOOD = "🎤 No entendí nada — inténtalo de nuevo."
+VOICE_FAILED = "🎤 No pude procesar ese mensaje de voz. Inténtalo de nuevo o escríbelo."
 
 
 def format_transcript(transcript: str) -> str:
@@ -186,10 +173,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as exc:
         await update.message.reply_text(VOICE_FAILED)
         user_obj = update.effective_user
-        first_name = user_obj.first_name if user_obj and user_obj.first_name else "Someone"
+        first_name = user_obj.first_name if user_obj and user_obj.first_name else "Alguien"
         await _notify_admins(
             context,
-            f"⚠️ Voice transcription error from {first_name} "
+            f"⚠️ Error de transcripción de voz de {first_name} "
             f"(chat {update.effective_chat.id}):\n{exc!r}",
         )
         return
@@ -210,7 +197,7 @@ async def _notify_admins(context: ContextTypes.DEFAULT_TYPE, message: str) -> No
 
 # --- Admin commands ---------------------------------------------------------
 
-ADMIN_ONLY = "🔒 Admin only. / Solo para administradores."
+ADMIN_ONLY = "🔒 Solo para administradores."
 
 
 async def _guard_admin(update: Update) -> bool:
@@ -224,9 +211,14 @@ async def _guard_admin(update: Update) -> bool:
     return False
 
 
+# Roles are stored in English ("admin"/"member"); translate only at display time.
+ROLE_LABELS = {ADMIN_USER_ROLE: "administrador", DEFAULT_USER_ROLE: "miembro"}
+
+
 def _user_label(user: dict) -> str:
-    handle = f"@{user['username']}" if user.get("username") else "(no username)"
-    return f"{user.get('first_name') or 'Someone'} {handle} — {user['role']}"
+    handle = f"@{user['username']}" if user.get("username") else "(sin usuario)"
+    role = ROLE_LABELS.get(user["role"], user["role"])
+    return f"{user.get('first_name') or 'Alguien'} {handle} — {role}"
 
 
 async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -234,22 +226,21 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     users = get_all_users()
     if not users:
-        await update.message.reply_text("No users yet. / Aún no hay usuarios.")
+        await update.message.reply_text("Aún no hay usuarios.")
         return
-    lines = ["👥 Users / Usuarios:"] + [f"• {_user_label(u)}" for u in users]
+    lines = ["👥 Usuarios:"] + [f"• {_user_label(u)}" for u in users]
     await update.message.reply_text("\n".join(lines))
 
 
 async def _resolve_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict | None:
     """Resolve the target user from the command's first arg (@username). Replies on error."""
     if not context.args:
-        await update.message.reply_text("Usage: /promote @username")
+        command = update.message.text.split()[0]
+        await update.message.reply_text(f"Uso: {command} @usuario")
         return None
     user = find_user_by_username(context.args[0])
     if user is None:
-        await update.message.reply_text(
-            f"User {context.args[0]} not found. / Usuario no encontrado."
-        )
+        await update.message.reply_text(f"Usuario {context.args[0]} no encontrado.")
     return user
 
 
@@ -280,19 +271,17 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user is None:
         return
     revoke_user(user["telegram_user_id"])
-    await update.message.reply_text(
-        f"🚫 Access revoked for {_user_label(user)}. / Acceso revocado."
-    )
+    await update.message.reply_text(f"🚫 Acceso revocado para {_user_label(user)}.")
 
 
-RESET_CONFIRM = "CONFIRM"
+RESET_CONFIRM = "CONFIRMAR"
 
 RESET_WARNING = (
-    "⚠️ */resetdb* deletes every list, every user and all settings, and builds an empty "
-    "database.\n\n"
-    "The current database is kept as a timestamped backup file next to it, but the bot will "
-    "not read it again. Everyone except you will have to send the password again.\n\n"
-    f"Send `/resetdb {RESET_CONFIRM}` to go ahead."
+    "⚠️ */resetdb* borra todas las listas, todos los usuarios y toda la configuración, y "
+    "crea una base de datos vacía.\n\n"
+    "La base de datos actual se guarda como copia de respaldo con fecha, pero el bot no "
+    "volverá a leerla. Todos menos tú tendrán que enviar la contraseña de nuevo.\n\n"
+    f"Envía `/resetdb {RESET_CONFIRM}` para continuar."
 )
 
 
@@ -310,14 +299,14 @@ async def resetdb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "telegram_user_id": user_obj.id,
             "chat_id": update.effective_chat.id,
             "username": user_obj.username or "",
-            "first_name": user_obj.first_name or "Someone",
+            "first_name": user_obj.first_name or "Alguien",
         }
     )
     clear_view_cache()
 
-    kept = "Previous database saved as " + backup.name if backup else "There was no database to back up"
+    kept = "Base de datos anterior guardada como " + backup.name if backup else "No había base de datos que respaldar"
     await update.message.reply_text(
-        f"♻️ Database recreated. You are still an admin.\n{kept}.\n{_reschedule(context)}"
+        f"♻️ Base de datos recreada. Sigues siendo administrador.\n{kept}.\n{_reschedule(context)}"
     )
 
 
@@ -332,19 +321,19 @@ def _parse_timezone(value: str) -> str:
     try:
         ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
-        raise ValueError(f"Unknown timezone '{name}'. Use an IANA name like America/La_Paz.")
+        raise ValueError(f"Zona horaria desconocida '{name}'. Usa un nombre IANA como America/La_Paz.")
     return name
 
 
 def _parse_hour(value: str) -> str:
     if not value.isdigit() or not 0 <= int(value) <= 23:
-        raise ValueError("The hour must be a whole number from 0 to 23.")
+        raise ValueError("La hora debe ser un número entero de 0 a 23.")
     return str(int(value))
 
 
 def _parse_days(value: str) -> str:
     if not value.isdigit() or int(value) < 1:
-        raise ValueError("The interval must be a whole number of days, 1 or more.")
+        raise ValueError("El intervalo debe ser un número entero de días, 1 o más.")
     return str(int(value))
 
 
@@ -358,15 +347,15 @@ def _parse_bool(value: str) -> str:
     try:
         return _BOOLEANS[value.strip().lower()]
     except KeyError:
-        raise ValueError("Use on or off.")
+        raise ValueError("Usa on u off.")
 
 
 # key -> (parser, one-line help). Adding a setting is one entry here.
 CONFIG_KEYS = {
-    "timezone": (_parse_timezone, "IANA zone, e.g. America/La_Paz"),
-    "alert_hour": (_parse_hour, "0-23, local time of the daily reminder"),
-    "alert_interval_days": (_parse_days, "days between shopping digests (1 or more)"),
-    "alert_enabled": (_parse_bool, "on or off, for the shopping digest"),
+    "timezone": (_parse_timezone, "zona IANA, p. ej. America/La_Paz"),
+    "alert_hour": (_parse_hour, "0-23, hora local del recordatorio diario"),
+    "alert_interval_days": (_parse_days, "días entre recordatorios de compras (1 o más)"),
+    "alert_enabled": (_parse_bool, "on u off, para el recordatorio de compras"),
 }
 
 # Changing these two moves the daily job, so it has to be rescheduled to take effect.
@@ -377,19 +366,19 @@ def config_status() -> str:
     """Every setting with its value, and whether it is stored or still the built-in default.
     `last_alert_at` is shown as status and is deliberately not editable."""
     stored = get_all_settings()
-    lines = ["⚙️ Settings / Configuración", ""]
+    lines = ["⚙️ Configuración", ""]
     for key in CONFIG_KEYS:
-        origin = "set" if key in stored else "default"
+        origin = "definido" if key in stored else "por defecto"
         # No column padding: Telegram renders this in a proportional font, so it would only
         # look aligned here and ragged on the phone.
         lines.append(f"• {key} = {get_setting(key)}  ({origin})")
     at = alert_time()
     lines += [
         "",
-        f"Last digest: {get_setting('last_alert_at') or 'never'}",
-        f"Daily reminder: {at.strftime('%H:%M')} {at.tzinfo}",
+        f"Último recordatorio de compras: {get_setting('last_alert_at') or 'nunca'}",
+        f"Recordatorio diario: {at.strftime('%H:%M')} {at.tzinfo}",
         "",
-        "Change / Cambiar:  /config <key> <value>",
+        "Cambiar:  /config <clave> <valor>",
         "  /config timezone America/Lima",
         "  /config alert_hour 8",
     ]
@@ -397,7 +386,7 @@ def config_status() -> str:
 
 
 def config_usage(reason: str) -> str:
-    lines = [f"⚠️ {reason}", "", "Usage: /config <key> <value>"]
+    lines = [f"⚠️ {reason}", "", "Uso: /config <clave> <valor>"]
     lines += [f"• {key} — {hint}" for key, (_, hint) in CONFIG_KEYS.items()]
     return "\n".join(lines)
 
@@ -406,9 +395,9 @@ def _reschedule(context: ContextTypes.DEFAULT_TYPE) -> str:
     """Move the running daily job onto the new schedule, so no restart is needed."""
     job_queue = getattr(context, "job_queue", None)
     if job_queue is None:  # only reachable if the bot runs without the job-queue extra
-        return "⚠️ Saved, but I could not reschedule — restart the bot to apply it."
+        return "⚠️ Guardado, pero no pude reprogramar — reinicia el bot para aplicarlo."
     at = schedule_alert_job(job_queue)
-    return f"⏰ Daily reminder now at {at.strftime('%H:%M')} {at.tzinfo}."
+    return f"⏰ Recordatorio diario ahora a las {at.strftime('%H:%M')} {at.tzinfo}."
 
 
 async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -421,10 +410,10 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     key = args[0].lower()
     if key not in CONFIG_KEYS:
-        await update.message.reply_text(config_usage(f"Unknown setting '{args[0]}'."))
+        await update.message.reply_text(config_usage(f"Ajuste desconocido '{args[0]}'."))
         return
     if len(args) < 2:
-        await update.message.reply_text(config_usage(f"/config {key} needs a value."))
+        await update.message.reply_text(config_usage(f"/config {key} necesita un valor."))
         return
 
     parse, _hint = CONFIG_KEYS[key]
@@ -444,12 +433,12 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def _alert_status() -> str:
     enabled = get_setting("alert_enabled") == "true"
     interval = get_setting("alert_interval_days")
-    last = get_setting("last_alert_at") or "never"
-    state = "ON" if enabled else "OFF"
+    last = get_setting("last_alert_at") or "nunca"
+    state = "ACTIVADA" if enabled else "DESACTIVADA"
     return (
-        f"⏰ Alert: {state}\n"
-        f"Interval: every {interval} day(s)\n"
-        f"Last sent: {last}"
+        f"⏰ Alerta: {state}\n"
+        f"Intervalo: cada {interval} día(s)\n"
+        f"Último envío: {last}"
     )
 
 
@@ -469,6 +458,6 @@ async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif sub == "every" and len(args) >= 2 and args[1].isdigit() and int(args[1]) > 0:
         set_setting("alert_interval_days", args[1])
     else:
-        await update.message.reply_text("Usage: /alert [on|off|every <N> days]")
+        await update.message.reply_text("Uso: /alert [on|off|every <N>]")
         return
     await update.message.reply_text(_alert_status())

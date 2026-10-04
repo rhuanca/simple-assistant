@@ -86,8 +86,10 @@ class LocalTimeTests(AppointmentTestCase):
             localtime.parse_local("2026-08-16T15:00"),
         )
 
-    def test_display_format(self):
-        self.assertEqual(localtime.format_local("2026-08-16T15:00"), "Sun 16 Aug 2026, 15:00")
+    def test_display_format_is_spanish(self):
+        """Hand-mapped names, so the result is Spanish regardless of the process locale."""
+        self.assertEqual(localtime.format_local("2026-08-16T15:00"), "dom 16 ago 2026, 15:00")
+        self.assertEqual(localtime.format_local("2026-01-05T09:30"), "lun 05 ene 2026, 09:30")
 
     def test_to_storage_drops_seconds(self):
         self.assertEqual(
@@ -146,14 +148,14 @@ class ReminderMessageTests(AppointmentTestCase):
             ({"title": "dentista", "starts_at": "2026-08-17T09:00"}, "day_before"),
         ]
         message = alerts.format_appointment_reminder(due)
-        self.assertIn("Today / Hoy:", message)
-        self.assertIn("• Sun 16 Aug 2026, 15:00 — doctor", message)
-        self.assertIn("Tomorrow / Mañana:", message)
-        self.assertIn("• Mon 17 Aug 2026, 09:00 — dentista", message)
+        self.assertIn("Hoy:", message)
+        self.assertIn("• dom 16 ago 2026, 15:00 — doctor", message)
+        self.assertIn("Mañana:", message)
+        self.assertIn("• lun 17 ago 2026, 09:00 — dentista", message)
 
     def test_omits_an_empty_section(self):
         due = [({"title": "doctor", "starts_at": "2026-08-16T15:00"}, "same_day")]
-        self.assertNotIn("Tomorrow", alerts.format_appointment_reminder(due))
+        self.assertNotIn("Mañana", alerts.format_appointment_reminder(due))
 
 
 if __name__ == "__main__":

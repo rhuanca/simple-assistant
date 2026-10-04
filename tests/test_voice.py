@@ -65,7 +65,7 @@ class TranscribeTests(unittest.TestCase):
         result, create = self._transcribe("agrega leche", audio=b"opus-bytes")
         self.assertEqual(result, "agrega leche")
         create.assert_called_once_with(
-            model=voice.STT_MODEL_DEFAULT, file=("voice.ogg", b"opus-bytes")
+            model=voice.STT_MODEL_DEFAULT, file=("voice.ogg", b"opus-bytes"), language="es"
         )
 
     def test_model_is_overridable_from_the_environment(self):

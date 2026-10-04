@@ -55,8 +55,8 @@ def format_appointment_reminder(due: list[tuple[dict, str]]) -> str | None:
         return None
     today = [a for a, kind in due if kind == "same_day"]
     tomorrow = [a for a, kind in due if kind == "day_before"]
-    blocks = ["📅 Appointment reminder / Recordatorio de citas"]
-    for heading, appointments in (("Today / Hoy", today), ("Tomorrow / Mañana", tomorrow)):
+    blocks = ["📅 Recordatorio de citas"]
+    for heading, appointments in (("Hoy", today), ("Mañana", tomorrow)):
         if not appointments:
             continue
         lines = [f"{heading}:"]

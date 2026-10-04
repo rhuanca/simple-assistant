@@ -15,7 +15,8 @@ from bot import localtime, storage
 
 SYSTEM_PROMPT = """\
 You are a grocery list assistant in a Telegram chat. You help users manage their shopping lists.
-The user may write in English or Spanish — always reply in the same language they used.
+The bot's interface and tool outputs are in Spanish. Reply in Spanish by default; only if
+the user writes in English, answer in English.
 
 Each person has two lists, selected by the `scope` argument of every tool:
   - "personal" — the sender's OWN private list. This is the DEFAULT: use it whenever the
@@ -61,7 +62,8 @@ When you cannot understand the request, ask for clarification in the user's lang
 Never reply with a bare acknowledgement such as "OK", "Done" or "Listo". Every reply must
 tell the user what actually happened.
   - After show_list: reproduce the tool's output, keeping every item and its number exactly
-    as given. You may translate only the header line into the user's language.
+    as given. The output is already in Spanish; translate only the header line, and only
+    when the user wrote in English.
   - After add, remove or clear: say what changed and on which list.
   - If a list is empty, say so plainly — never answer with nothing.
 Keep replies short and friendly, but never empty.
@@ -128,15 +130,15 @@ def _format_view_block(view: dict) -> str:
 
 # Tool return strings are shown to the user verbatim whenever the model ends its turn
 # without any text of its own, so they are written as user-facing copy.
-_LIST_TITLES = {"personal": "🛒 My list", "common": "🏠 Common list"}
-_LIST_TARGETS = {"personal": "your list", "common": "the common list"}
+_LIST_TITLES = {"personal": "🛒 Mi lista", "common": "🏠 Lista común"}
+_LIST_TARGETS = {"personal": "tu lista", "common": "la lista común"}
 
 
 def _render_list(title: str, items: list[dict]) -> str:
     if not items:
-        return f"{title} is empty."
+        return f"{title} está vacía."
     plural = "" if len(items) == 1 else "s"
-    lines = [f"{title} — {len(items)} item{plural}"]
+    lines = [f"{title} — {len(items)} artículo{plural}"]
     for i, item in enumerate(items, 1):
         lines.append(f"{i}. {item['item_text']}")
     return "\n".join(lines)
@@ -163,7 +165,7 @@ def add_items(
     for item in items:
         storage.add_item(item, owner_user_id=owner, added_by=added_by)
     _refresh_user_cache()
-    return f"✅ Added to {_LIST_TARGETS[scope]}: {', '.join(items)}"
+    return f"✅ Agregado a {_LIST_TARGETS[scope]}: {', '.join(items)}"
 
 
 @tool
@@ -183,10 +185,10 @@ def remove_items(
     _refresh_user_cache()
     parts = []
     if removed:
-        parts.append(f"✅ Removed from {_LIST_TARGETS[scope]}: {', '.join(removed)}")
+        parts.append(f"✅ Eliminado de {_LIST_TARGETS[scope]}: {', '.join(removed)}")
     if not_found:
-        parts.append(f"⚠️ Not found: {', '.join(not_found)}")
-    return "\n".join(parts) if parts else "Nothing to remove."
+        parts.append(f"⚠️ No encontrado: {', '.join(not_found)}")
+    return "\n".join(parts) if parts else "Nada que eliminar."
 
 
 @tool
@@ -223,14 +225,14 @@ def remove_items_by_number(
 
     report = []
     if removed:
-        report.append(f"✅ Removed from {_LIST_TARGETS[scope]}: {', '.join(removed)}")
+        report.append(f"✅ Eliminado de {_LIST_TARGETS[scope]}: {', '.join(removed)}")
     if missing:
         plural = "" if len(items) == 1 else "s"
         report.append(
-            f"⚠️ There is no item {', '.join(str(n) for n in missing)} — "
-            f"{_LIST_TARGETS[scope]} has {len(items)} item{plural}."
+            f"⚠️ No existe el artículo {', '.join(str(n) for n in missing)} — "
+            f"{_LIST_TARGETS[scope]} tiene {len(items)} artículo{plural}."
         )
-    return "\n".join(report) or "Nothing to remove."
+    return "\n".join(report) or "Nada que eliminar."
 
 
 @tool
@@ -250,14 +252,14 @@ def clear_list(scope: _SCOPE_ARG = "personal") -> str:
     _refresh_user_cache()
     target = _LIST_TARGETS[scope]
     if count == 0:
-        return f"Nothing to clear — {target} was already empty."
+        return f"Nada que borrar — {target} ya estaba vacía."
     plural = "" if count == 1 else "s"
-    return f"🗑️ Cleared {count} item{plural} from {target}."
+    return f"🗑️ Eliminé {count} artículo{plural} de {target}."
 
 
 # --- Appointments -----------------------------------------------------------
 
-_NO_USER = "I could not tell who you are, so I cannot manage your appointments."
+_NO_USER = "No pude identificarte, así que no puedo manejar tus citas."
 
 
 def _render_appointments(title: str, appointments: list[dict]) -> str:
@@ -290,9 +292,9 @@ def add_appointment(
     try:
         moment = localtime.parse_local(starts_at)
     except ValueError:
-        return f"I could not read '{starts_at}' as a date and time. Use YYYY-MM-DDTHH:MM."
+        return f"No pude leer '{starts_at}' como fecha y hora. Usa YYYY-MM-DDTHH:MM."
     storage.add_appointment(title, localtime.to_storage(moment), owner_user_id=user_id)
-    return f"📅 Saved: {localtime.format_local(moment)} — {title}"
+    return f"📅 Guardada: {localtime.format_local(moment)} — {title}"
 
 
 @tool
@@ -304,8 +306,8 @@ def list_appointments() -> str:
     now = localtime.to_storage(localtime.now_local())
     appointments = storage.get_upcoming_appointments(user_id, now)
     if not appointments:
-        return "📅 You have no upcoming appointments."
-    return _render_appointments(f"📅 Upcoming appointments — {len(appointments)}", appointments)
+        return "📅 No tienes citas próximas."
+    return _render_appointments(f"📅 Próximas citas — {len(appointments)}", appointments)
 
 
 @tool
@@ -323,15 +325,15 @@ def cancel_appointment(
     now = localtime.to_storage(localtime.now_local())
     matches = storage.find_upcoming_appointments(title, user_id, now)
     if not matches:
-        return f"⚠️ No upcoming appointment matches '{title}'."
+        return f"⚠️ Ninguna cita próxima coincide con '{title}'."
     if len(matches) > 1:
         return _render_appointments(
-            f"Several appointments match '{title}' — which one do you mean?", matches
+            f"Varias citas coinciden con '{title}' — ¿cuál quieres decir?", matches
         )
     appointment = matches[0]
     storage.cancel_appointment(appointment["id"], user_id)
     when = localtime.format_local(appointment["starts_at"])
-    return f"🗑️ Cancelled: {when} — {appointment['title']}"
+    return f"🗑️ Cancelada: {when} — {appointment['title']}"
 
 
 class AgentError(Exception):
@@ -419,7 +421,7 @@ def _extract_text(result: dict) -> str:
     for message in reversed(messages):
         if isinstance(message, ToolMessage):
             return _reply(str(message.content))
-    return "Done. / Listo."
+    return "Listo."
 
 
 def format_lists_for(user_id: int) -> str | None:
@@ -430,7 +432,7 @@ def format_lists_for(user_id: int) -> str | None:
     if not personal and not common:
         return None
     blocks = [
-        "🛒 Shopping reminder / Recordatorio de compras",
+        "🛒 Recordatorio de compras",
         _render_list(_LIST_TITLES["personal"], personal),
         _render_list(_LIST_TITLES["common"], common),
     ]
@@ -459,13 +461,13 @@ async def run(text: str, user: str = "", user_id: int | None = None) -> str:
             if "PERMISSION_DENIED" in error or "403" in error:
                 raise AgentError(
                     user_message=(
-                        "I cannot access Gemini right now (permission denied). "
-                        "Please update your Google AI project/API key, then try again."
+                        "No puedo acceder a Gemini en este momento (permiso denegado). "
+                        "Actualiza el proyecto o la clave de Google AI e inténtalo de nuevo."
                     ),
                     admin_detail=f"Gemini permission denied: {error}",
                 ) from exc
             raise AgentError(
-                user_message="I hit an unexpected model error. Please try again in a moment.",
+                user_message="Tuve un error inesperado del modelo. Inténtalo de nuevo en un momento.",
                 admin_detail=f"Model error: {error}",
             ) from exc
     finally:

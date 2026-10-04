@@ -12,8 +12,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from bot import storage
 
 FALLBACK_TIMEZONE = "America/La_Paz"
-# Read back by the model, so keep it unambiguous: "Sun 16 Aug 2026, 15:00".
-DISPLAY_FORMAT = "%a %d %b %Y, %H:%M"
+# Spanish names mapped by hand: strftime's %a/%b follow the process locale, which on the
+# Pi is C/POSIX (English), and generating an es_* locale there is a deploy step we can
+# skip entirely. Display: "dom 16 ago 2026, 15:00" — read back by the model, so keep it
+# unambiguous.
+DAY_NAMES = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]  # datetime.weekday(), 0=Mon
+MONTH_NAMES = ["ene", "feb", "mar", "abr", "may", "jun",
+               "jul", "ago", "sep", "oct", "nov", "dic"]
 # What the model is asked to produce, and what goes in the database.
 STORAGE_FORMAT = "%Y-%m-%dT%H:%M"
 
@@ -46,4 +51,6 @@ def to_storage(moment: datetime) -> str:
 
 def format_local(value: str | datetime) -> str:
     moment = parse_local(value) if isinstance(value, str) else value
-    return moment.strftime(DISPLAY_FORMAT)
+    day = DAY_NAMES[moment.weekday()]
+    month = MONTH_NAMES[moment.month - 1]
+    return f"{day} {moment.day:02d} {month} {moment.year}, {moment:%H:%M}"

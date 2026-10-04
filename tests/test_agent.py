@@ -27,21 +27,21 @@ class ExtractTextTests(unittest.TestCase):
     """The bug behind the "OK" reply: an empty final model turn must still say something."""
 
     def test_model_text_wins(self):
-        result = {"messages": [ToolMessage("🛒 My list is empty.", tool_call_id="1"),
-                               AIMessage("Your list is empty.")]}
-        self.assertEqual(agent._extract_text(result), "Your list is empty.")
+        result = {"messages": [ToolMessage("🛒 Mi lista está vacía.", tool_call_id="1"),
+                               AIMessage("Tu lista está vacía.")]}
+        self.assertEqual(agent._extract_text(result), "Tu lista está vacía.")
 
     def test_empty_final_turn_falls_back_to_tool_output(self):
-        result = {"messages": [HumanMessage("show me my list"),
-                               ToolMessage("🛒 My list is empty.", tool_call_id="1"),
+        result = {"messages": [HumanMessage("muéstrame mi lista"),
+                               ToolMessage("🛒 Mi lista está vacía.", tool_call_id="1"),
                                AIMessage("")]}
-        self.assertEqual(agent._extract_text(result), "🛒 My list is empty.")
+        self.assertEqual(agent._extract_text(result), "🛒 Mi lista está vacía.")
 
     def test_falls_back_to_the_last_tool_output(self):
         result = {"messages": [ToolMessage("Cache stale: id=1", tool_call_id="1"),
-                               ToolMessage("🛒 My list — 1 item\n1. milk", tool_call_id="2"),
+                               ToolMessage("🛒 Mi lista — 1 artículo\n1. milk", tool_call_id="2"),
                                AIMessage("   ")]}
-        self.assertEqual(agent._extract_text(result), "🛒 My list — 1 item\n1. milk")
+        self.assertEqual(agent._extract_text(result), "🛒 Mi lista — 1 artículo\n1. milk")
 
     def test_content_blocks_are_joined_and_non_dict_blocks_ignored(self):
         message = AIMessage([{"type": "text", "text": "Here: "}, "raw", {"type": "thinking"},
@@ -50,7 +50,7 @@ class ExtractTextTests(unittest.TestCase):
 
     def test_no_text_and_no_tool_output_still_replies(self):
         result = {"messages": [AIMessage("")]}
-        self.assertEqual(agent._extract_text(result), "Done. / Listo.")
+        self.assertEqual(agent._extract_text(result), "Listo.")
 
     def test_internal_ids_are_never_shown_to_the_user(self):
         """The model sometimes echoes the [Recently viewed list] block, ids and all."""
@@ -75,22 +75,22 @@ class ScopeTests(AgentTestCase):
 
 class ShowListTests(AgentTestCase):
     def test_empty_personal_list(self):
-        self.assertEqual(agent.show_list.invoke({"scope": "personal"}), "🛒 My list is empty.")
+        self.assertEqual(agent.show_list.invoke({"scope": "personal"}), "🛒 Mi lista está vacía.")
 
     def test_empty_common_list(self):
-        self.assertEqual(agent.show_list.invoke({"scope": "common"}), "🏠 Common list is empty.")
+        self.assertEqual(agent.show_list.invoke({"scope": "common"}), "🏠 Lista común está vacía.")
 
     def test_numbered_rendering(self):
         for item in ("milk", "bread", "eggs"):
             storage.add_item(item, owner_user_id=USER_ID)
         self.assertEqual(
             agent.show_list.invoke({"scope": "personal"}),
-            "🛒 My list — 3 items\n1. milk\n2. bread\n3. eggs",
+            "🛒 Mi lista — 3 artículos\n1. milk\n2. bread\n3. eggs",
         )
 
     def test_single_item_is_not_pluralised(self):
         storage.add_item("milk", owner_user_id=USER_ID)
-        self.assertIn("1 item\n", agent.show_list.invoke({"scope": "personal"}))
+        self.assertIn("1 artículo\n", agent.show_list.invoke({"scope": "personal"}))
 
     def test_numbers_match_the_cached_view(self):
         """Deleting by number depends on show_list and the cached view agreeing."""
@@ -107,7 +107,7 @@ class ShowListTests(AgentTestCase):
         storage.add_item("milk", owner_user_id=USER_ID)
         storage.add_item("someone else's", owner_user_id=USER_ID + 1)
         self.assertEqual(
-            agent.show_list.invoke({"scope": "personal"}), "🛒 My list — 1 item\n1. milk"
+            agent.show_list.invoke({"scope": "personal"}), "🛒 Mi lista — 1 artículo\n1. milk"
         )
 
 
@@ -115,18 +115,18 @@ class MutationReplyTests(AgentTestCase):
     def test_add_items_names_the_list_and_the_items(self):
         self.assertEqual(
             agent.add_items.invoke({"items": ["milk", "eggs"], "scope": "personal"}),
-            "✅ Added to your list: milk, eggs",
+            "✅ Agregado a tu lista: milk, eggs",
         )
         self.assertEqual(
             agent.add_items.invoke({"items": ["soap"], "scope": "common"}),
-            "✅ Added to the common list: soap",
+            "✅ Agregado a la lista común: soap",
         )
 
     def test_remove_items_reports_removed_and_missing(self):
         storage.add_item("milk", owner_user_id=USER_ID)
         self.assertEqual(
             agent.remove_items.invoke({"items": ["milk", "soap"], "scope": "personal"}),
-            "✅ Removed from your list: milk\n⚠️ Not found: soap",
+            "✅ Eliminado de tu lista: milk\n⚠️ No encontrado: soap",
         )
 
     def test_remove_by_number(self):
@@ -134,7 +134,7 @@ class MutationReplyTests(AgentTestCase):
             storage.add_item(item, owner_user_id=USER_ID)
         self.assertEqual(
             agent.remove_items_by_number.invoke({"numbers": [2], "scope": "personal"}),
-            "✅ Removed from your list: leche",
+            "✅ Eliminado de tu lista: leche",
         )
         self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID)], ["pan", "huevos"])
 
@@ -145,7 +145,7 @@ class MutationReplyTests(AgentTestCase):
             storage.add_item(item, owner_user_id=USER_ID)
         self.assertEqual(
             agent.remove_items_by_number.invoke({"numbers": [2, 4], "scope": "personal"}),
-            "✅ Removed from your list: leche, queso",
+            "✅ Eliminado de tu lista: leche, queso",
         )
         self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID)], ["pan", "huevos"])
 
@@ -153,7 +153,7 @@ class MutationReplyTests(AgentTestCase):
         storage.add_item("pan", owner_user_id=USER_ID)
         reply = agent.remove_items_by_number.invoke({"numbers": [9], "scope": "personal"})
 
-        self.assertEqual(reply, "⚠️ There is no item 9 — your list has 1 item.")
+        self.assertEqual(reply, "⚠️ No existe el artículo 9 — tu lista tiene 1 artículo.")
         self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID)], ["pan"])
 
     def test_remove_by_number_ignores_a_repeated_number(self):
@@ -161,7 +161,7 @@ class MutationReplyTests(AgentTestCase):
             storage.add_item(item, owner_user_id=USER_ID)
         self.assertEqual(
             agent.remove_items_by_number.invoke({"numbers": [1, 1], "scope": "personal"}),
-            "✅ Removed from your list: pan",
+            "✅ Eliminado de tu lista: pan",
         )
 
     def test_remove_by_number_on_the_common_list(self):
@@ -169,7 +169,7 @@ class MutationReplyTests(AgentTestCase):
         storage.add_item("jabon", owner_user_id=None)
         self.assertEqual(
             agent.remove_items_by_number.invoke({"numbers": [1], "scope": "common"}),
-            "✅ Removed from the common list: jabon",
+            "✅ Eliminado de la lista común: jabon",
         )
         self.assertEqual(storage.get_items(None), [])
         self.assertEqual(len(storage.get_items(USER_ID)), 1)
@@ -181,7 +181,7 @@ class MutationReplyTests(AgentTestCase):
         storage.add_item("theirs", owner_user_id=USER_ID + 1)
 
         reply = agent.remove_items_by_number.invoke({"numbers": [2], "scope": "personal"})
-        self.assertIn("no item 2", reply)
+        self.assertIn("No existe el artículo 2", reply)
         self.assertEqual([i["item_text"] for i in storage.get_items(USER_ID + 1)], ["theirs"])
 
     def test_clear_list_reports_the_count(self):
@@ -189,13 +189,13 @@ class MutationReplyTests(AgentTestCase):
             storage.add_item(item, owner_user_id=USER_ID)
         self.assertEqual(
             agent.clear_list.invoke({"scope": "personal"}),
-            "🗑️ Cleared 2 items from your list.",
+            "🗑️ Eliminé 2 artículos de tu lista.",
         )
 
     def test_clear_empty_list_says_so(self):
         self.assertEqual(
             agent.clear_list.invoke({"scope": "personal"}),
-            "Nothing to clear — your list was already empty.",
+            "Nada que borrar — tu lista ya estaba vacía.",
         )
 
 
@@ -214,16 +214,16 @@ class AppointmentToolTests(AgentTestCase):
         stored, shown = self._in_days(7)
         self.assertEqual(
             agent.add_appointment.invoke({"title": "doctor", "starts_at": stored}),
-            f"📅 Saved: {shown} — doctor",
+            f"📅 Guardada: {shown} — doctor",
         )
 
     def test_add_appointment_rejects_an_unparseable_time(self):
         reply = agent.add_appointment.invoke({"title": "doctor", "starts_at": "next sunday"})
-        self.assertIn("could not read", reply.lower())
+        self.assertIn("no pude leer", reply.lower())
         self.assertEqual(storage.get_upcoming_appointments(USER_ID, "0000"), [])
 
     def test_list_appointments_when_empty(self):
-        self.assertEqual(agent.list_appointments.invoke({}), "📅 You have no upcoming appointments.")
+        self.assertEqual(agent.list_appointments.invoke({}), "📅 No tienes citas próximas.")
 
     def test_list_appointments_is_numbered_and_soonest_first(self):
         later, later_shown = self._in_days(9)
@@ -233,13 +233,13 @@ class AppointmentToolTests(AgentTestCase):
 
         self.assertEqual(
             agent.list_appointments.invoke({}),
-            f"📅 Upcoming appointments — 2\n1. {sooner_shown} — doctor\n2. {later_shown} — dentista",
+            f"📅 Próximas citas — 2\n1. {sooner_shown} — doctor\n2. {later_shown} — dentista",
         )
 
     def test_list_appointments_hides_other_users(self):
         stored, _ = self._in_days(3)
         storage.add_appointment("secreto", stored, USER_ID + 1)
-        self.assertEqual(agent.list_appointments.invoke({}), "📅 You have no upcoming appointments.")
+        self.assertEqual(agent.list_appointments.invoke({}), "📅 No tienes citas próximas.")
 
     def test_cancel_appointment(self):
         stored, shown = self._in_days(4)
@@ -247,13 +247,13 @@ class AppointmentToolTests(AgentTestCase):
 
         self.assertEqual(
             agent.cancel_appointment.invoke({"title": "doctor"}),
-            f"🗑️ Cancelled: {shown} — doctor",
+            f"🗑️ Cancelada: {shown} — doctor",
         )
         self.assertEqual(storage.get_upcoming_appointments(USER_ID, "0000"), [])
 
     def test_cancel_appointment_with_no_match(self):
         reply = agent.cancel_appointment.invoke({"title": "doctor"})
-        self.assertIn("No upcoming appointment matches", reply)
+        self.assertIn("Ninguna cita próxima coincide", reply)
 
     def test_cancel_appointment_asks_when_several_match(self):
         first, _ = self._in_days(2)
@@ -262,14 +262,14 @@ class AppointmentToolTests(AgentTestCase):
         storage.add_appointment("doctor Paz", second, USER_ID)
 
         reply = agent.cancel_appointment.invoke({"title": "doctor"})
-        self.assertIn("which one", reply.lower())
+        self.assertIn("cuál", reply.lower())
         self.assertEqual(len(storage.get_upcoming_appointments(USER_ID, "0000")), 2)
 
     def test_cannot_cancel_another_users_appointment(self):
         stored, _ = self._in_days(3)
         storage.add_appointment("secreto", stored, USER_ID + 1)
 
-        self.assertIn("No upcoming appointment matches", agent.cancel_appointment.invoke({"title": "secreto"}))
+        self.assertIn("Ninguna cita próxima coincide", agent.cancel_appointment.invoke({"title": "secreto"}))
         self.assertEqual(len(storage.get_upcoming_appointments(USER_ID + 1, "0000")), 1)
 
 
@@ -316,8 +316,8 @@ class AlertRenderingTests(AgentTestCase):
     def test_renders_both_lists(self):
         storage.add_item("milk", owner_user_id=USER_ID)
         message = agent.format_lists_for(USER_ID)
-        self.assertIn("🛒 My list — 1 item\n1. milk", message)
-        self.assertIn("🏠 Common list is empty.", message)
+        self.assertIn("🛒 Mi lista — 1 artículo\n1. milk", message)
+        self.assertIn("🏠 Lista común está vacía.", message)
 
     def test_the_digest_never_carries_ids(self):
         """This one goes straight to Telegram without passing through _reply(), so ids here

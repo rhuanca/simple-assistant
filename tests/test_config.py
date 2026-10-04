@@ -118,13 +118,13 @@ class ConfigStatusTests(ConfigTestCase):
         status = handlers.config_status()
 
         self.assertIn("alert_interval_days", status)
-        self.assertIn("• alert_interval_days = 5  (set)", status)
-        self.assertIn("• timezone = America/La_Paz  (default)", status)
+        self.assertIn("• alert_interval_days = 5  (definido)", status)
+        self.assertIn("• timezone = America/La_Paz  (por defecto)", status)
 
     def test_shows_the_resolved_reminder_time_and_last_digest(self):
         status = handlers.config_status()
-        self.assertIn("Daily reminder: 09:00 America/La_Paz", status)
-        self.assertIn("Last digest: never", status)
+        self.assertIn("Recordatorio diario: 09:00 America/La_Paz", status)
+        self.assertIn("Último recordatorio de compras: nunca", status)
 
     def test_usage_lists_every_editable_key(self):
         usage = handlers.config_usage("nope")
@@ -172,7 +172,7 @@ class ConfigCommandTests(ConfigTestCase):
 
     async def test_admin_with_no_args_sees_the_settings(self):
         reply = await self._run(ADMIN_ID, ADMIN_CHAT, [])
-        self.assertIn("⚙️ Settings", reply)
+        self.assertIn("⚙️ Configuración", reply)
 
     async def test_setting_the_hour_saves_and_reschedules(self):
         queue = StubJobQueue()
@@ -204,26 +204,26 @@ class ConfigCommandTests(ConfigTestCase):
         queue = StubJobQueue()
         reply = await self._run(ADMIN_ID, ADMIN_CHAT, ["timezone", "Nowhere/Nope"], queue)
 
-        self.assertIn("Unknown timezone", reply)
+        self.assertIn("Zona horaria desconocida", reply)
         self.assertEqual(storage.get_all_settings(), {})
         self.assertEqual(queue.scheduled, [])
 
     async def test_unknown_key_shows_the_usage(self):
         reply = await self._run(ADMIN_ID, ADMIN_CHAT, ["bot_password", "hunter2"])
-        self.assertIn("Unknown setting", reply)
+        self.assertIn("Ajuste desconocido", reply)
         self.assertEqual(storage.get_all_settings(), {})
 
     async def test_last_alert_at_is_not_editable(self):
         reply = await self._run(ADMIN_ID, ADMIN_CHAT, ["last_alert_at", "1999-01-01"])
-        self.assertIn("Unknown setting", reply)
+        self.assertIn("Ajuste desconocido", reply)
 
     async def test_a_key_without_a_value_shows_the_usage(self):
         reply = await self._run(ADMIN_ID, ADMIN_CHAT, ["alert_hour"])
-        self.assertIn("needs a value", reply)
+        self.assertIn("necesita un valor", reply)
 
     async def test_saving_without_a_job_queue_says_restart(self):
         reply = await self._run(ADMIN_ID, ADMIN_CHAT, ["alert_hour", "7"], None)
-        self.assertIn("restart", reply.lower())
+        self.assertIn("reinicia", reply.lower())
         self.assertEqual(storage.get_setting("alert_hour"), "7")
 
 
@@ -235,7 +235,7 @@ class HelpTests(ConfigTestCase):
 
     async def test_members_do_not_see_admin_commands(self):
         reply = await self._help(MEMBER_ID, MEMBER_CHAT)
-        self.assertIn("Appointments", reply)
+        self.assertIn("Citas", reply)
         self.assertNotIn("/config", reply)
         self.assertNotIn("/resetdb", reply)
 
@@ -251,7 +251,7 @@ class HelpTests(ConfigTestCase):
 
     def test_help_covers_all_three_domains(self):
         text = handlers.build_help(for_admin=False)
-        for topic in ("Lists", "Appointments", "Reminders"):
+        for topic in ("Listas", "Citas", "Recordatorios"):
             self.assertIn(topic, text)
 
 

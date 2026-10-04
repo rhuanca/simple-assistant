@@ -32,5 +32,7 @@ def transcribe(audio: bytes, filename: str = "voice.ogg") -> str:
     result = _get_client().audio.transcriptions.create(
         model=os.getenv("SPEECH_STT_MODEL", STT_MODEL_DEFAULT),
         file=(filename, audio),
+        # The household speaks Spanish; pinning the language helps faster-whisper-tiny a lot.
+        language="es",
     )
     return result.text.strip()
