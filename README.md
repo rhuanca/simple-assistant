@@ -101,8 +101,15 @@ it in `.env`:
 
 ```
 SPEECH_API_URL=http://192.168.68.114:8000/v1
-SPEECH_STT_MODEL=Systran/faster-whisper-tiny     # optional, this is the default
+SPEECH_STT_MODEL=Systran/faster-whisper-tiny         # optional, this is the default
+SPEECH_TTS_MODEL=speaches-ai/Kokoro-82M-v1.0-ONNX    # optional, this is the default
+SPEECH_TTS_VOICE=ef_dora                             # optional; a Spanish Kokoro voice
 ```
+
+With `SPEECH_API_URL` set, the daily reminder also arrives as a **voice note**: the same
+text, synthesized by Kokoro on your server and sent right after the text message. It is
+best-effort — if TTS fails, the text reminder still goes out, and the failure is only
+logged. Kokoro's Spanish voices are `ef_dora`, `em_alex` and `em_santa`.
 
 Voice is optional: without `SPEECH_API_URL` the bot runs normally and answers voice notes
 with "not set up". `faster-whisper-tiny` is fast but rough, especially on Spanish — if
@@ -136,7 +143,9 @@ One scheduled DM per user, once a day, containing whichever sections apply:
 - **Appointments** — the day before, and the morning of.
 - **Shopping lists** — only when the configured interval has elapsed (default: every 3 days).
 
-You never get two separate notifications. Users with nothing due are skipped.
+You never get two separate text notifications. Users with nothing due are skipped. When a
+speech server is configured, the reminder is also sent as a voice note (see
+[Voice messages](#voice-messages)).
 
 Admins control it with `/alert`:
 
