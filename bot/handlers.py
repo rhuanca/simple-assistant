@@ -122,6 +122,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _run_and_reply(update, context, text)
 
 
+_TYPING_REFRESH_SECONDS = 4
+
+
+async def _with_typing(chat, coro, refresh: float = _TYPING_REFRESH_SECONDS):
+    """Run `coro` keeping the typing indicator alive until it finishes. A single chat
+    action fades after ~5 seconds, which is shorter than transcription plus the agent on
+    a slow day — sent once, the dots die mid-wait and the chat looks dead."""
+    task = asyncio.ensure_future(coro)
+    try:
+        while not task.done():
+            await chat.send_action("typing")
+            await asyncio.wait({task}, timeout=refresh)
+    finally:
+        if not task.done():
+            task.cancel()
+    return await task
+
+
 async def _run_and_reply(
     update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, prefix: str = ""
 ) -> None:
@@ -132,9 +150,10 @@ async def _run_and_reply(
     user_id = user_obj.id if user_obj else 0
     first_name = user_obj.first_name if user_obj and user_obj.first_name else "Alguien"
 
-    await update.effective_chat.send_action("typing")
     try:
-        reply = await run(text, user=first_name, user_id=user_id)
+        reply = await _with_typing(
+            update.effective_chat, run(text, user=first_name, user_id=user_id)
+        )
     except AgentError as exc:
         reply = exc.user_message
         await _notify_admins(context, f"⚠️ Error del bot de {first_name} (chat {chat_id}):\n{exc.admin_detail}")
@@ -164,12 +183,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(VOICE_NOT_CONFIGURED)
         return
 
-    await update.effective_chat.send_action("typing")
-    try:
+    async def fetch_and_transcribe() -> str:
         file = await update.message.voice.get_file()
         audio = bytes(await file.download_as_bytearray())
         # The speech client is sync; a thread keeps transcription off the event loop.
-        text = await asyncio.to_thread(voice.transcribe, audio)
+        return await asyncio.to_thread(voice.transcribe, audio)
+
+    try:
+        text = await _with_typing(update.effective_chat, fetch_and_transcribe())
     except Exception as exc:
         await update.message.reply_text(VOICE_FAILED)
         user_obj = update.effective_user
