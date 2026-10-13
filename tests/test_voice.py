@@ -8,17 +8,17 @@ from bot import handlers, voice
 
 
 class ConfiguredTests(unittest.TestCase):
-    def test_not_configured_without_url(self):
+    def test_not_configured_without_key(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertFalse(voice.is_configured())
 
-    def test_configured_with_url(self):
-        with mock.patch.dict(os.environ, {"SPEECH_API_URL": "http://example.local:8000/v1"}):
+    def test_configured_with_key(self):
+        with mock.patch.dict(os.environ, {"ELEVENLABS_API_KEY": "dummy-elevenlabs-key"}):
             self.assertTrue(voice.is_configured())
 
 
 class ClientTests(unittest.TestCase):
-    """The speech server is the only thing the audio may reach, and it gets no credential.
+    """The ElevenLabs key goes only to ElevenLabs, and no other credential rides along.
 
     This is the guard from the global secrets rule: if someone ever wires the Telegram
     token or the Gemini key into this client, these tests go red."""
@@ -28,53 +28,49 @@ class ClientTests(unittest.TestCase):
         voice._client = None
         self.addCleanup(lambda: setattr(voice, "_client", self._orig))
 
-    def test_client_points_at_the_configured_server_with_a_dummy_key(self):
+    def test_client_gets_only_the_elevenlabs_key(self):
         env = {
-            "SPEECH_API_URL": "http://example.local:8000/v1",
+            "ELEVENLABS_API_KEY": "dummy-elevenlabs-key",
             "TELEGRAM_BOT_TOKEN": "real-telegram-token",
             "GEMINI_API_KEY": "real-gemini-key",
         }
         with mock.patch.dict(os.environ, env):
-            with mock.patch.object(voice, "OpenAI") as openai_cls:
+            with mock.patch.object(voice, "ElevenLabs") as client_cls:
                 voice._get_client()
-        openai_cls.assert_called_once_with(
-            base_url="http://example.local:8000/v1", api_key="not-needed"
-        )
-        _, kwargs = openai_cls.call_args
-        for value in kwargs.values():
+        client_cls.assert_called_once_with(api_key="dummy-elevenlabs-key")
+        for value in client_cls.call_args.kwargs.values():
             self.assertNotIn("real-telegram-token", str(value))
             self.assertNotIn("real-gemini-key", str(value))
 
     def test_client_is_built_once(self):
-        with mock.patch.dict(os.environ, {"SPEECH_API_URL": "http://example.local:8000/v1"}):
-            with mock.patch.object(voice, "OpenAI") as openai_cls:
+        with mock.patch.dict(os.environ, {"ELEVENLABS_API_KEY": "dummy-elevenlabs-key"}):
+            with mock.patch.object(voice, "ElevenLabs") as client_cls:
                 first = voice._get_client()
                 second = voice._get_client()
         self.assertIs(first, second)
-        openai_cls.assert_called_once()
+        client_cls.assert_called_once()
 
 
 class TranscribeTests(unittest.TestCase):
     def _transcribe(self, text: str, env: dict | None = None, audio: bytes = b"OggS") -> tuple:
         client = mock.Mock()
-        client.audio.transcriptions.create.return_value = mock.Mock(text=text)
+        client.speech_to_text.convert.return_value = mock.Mock(text=text)
         with mock.patch.dict(os.environ, env or {}):
             with mock.patch.object(voice, "_get_client", return_value=client):
                 result = voice.transcribe(audio)
-        return result, client.audio.transcriptions.create
+        return result, client.speech_to_text.convert
 
-    def test_sends_the_audio_and_default_model(self):
-        result, create = self._transcribe("agrega leche", audio=b"opus-bytes")
+    def test_sends_the_audio_with_the_default_model_in_spanish(self):
+        result, convert = self._transcribe("agrega leche", audio=b"opus-bytes")
         self.assertEqual(result, "agrega leche")
-        create.assert_called_once_with(
-            model=voice.STT_MODEL_DEFAULT, file=("voice.ogg", b"opus-bytes"), language="es"
-        )
+        kwargs = convert.call_args.kwargs
+        self.assertEqual(kwargs["model_id"], voice.STT_MODEL_DEFAULT)
+        self.assertEqual(kwargs["language_code"], "es")
+        self.assertEqual(kwargs["file"].read(), b"opus-bytes")
 
     def test_model_is_overridable_from_the_environment(self):
-        _, create = self._transcribe(
-            "hi", env={"SPEECH_STT_MODEL": "Systran/faster-whisper-small"}
-        )
-        self.assertEqual(create.call_args.kwargs["model"], "Systran/faster-whisper-small")
+        _, convert = self._transcribe("hi", env={"ELEVENLABS_STT_MODEL": "scribe_v1"})
+        self.assertEqual(convert.call_args.kwargs["model_id"], "scribe_v1")
 
     def test_whitespace_is_stripped(self):
         result, _ = self._transcribe("  add milk \n")
@@ -88,28 +84,28 @@ class TranscribeTests(unittest.TestCase):
 class SynthesizeTests(unittest.TestCase):
     def _synthesize(self, env: dict | None = None) -> tuple:
         client = mock.Mock()
-        client.audio.speech.create.return_value = mock.Mock(content=b"mp3-bytes")
+        client.text_to_speech.convert.return_value = iter([b"mp3-", b"bytes"])
         with mock.patch.dict(os.environ, env or {}):
             with mock.patch.object(voice, "_get_client", return_value=client):
                 result = voice.synthesize("Recordatorio de citas")
-        return result, client.audio.speech.create
+        return result, client.text_to_speech.convert
 
-    def test_sends_the_text_with_the_default_spanish_voice(self):
-        result, create = self._synthesize()
+    def test_joins_the_chunks_with_default_voice_and_model(self):
+        result, convert = self._synthesize()
         self.assertEqual(result, b"mp3-bytes")
-        create.assert_called_once_with(
-            model=voice.TTS_MODEL_DEFAULT,
-            voice=voice.TTS_VOICE_DEFAULT,
-            input="Recordatorio de citas",
-            response_format="mp3",
+        convert.assert_called_once_with(
+            text="Recordatorio de citas",
+            voice_id=voice.TTS_VOICE_DEFAULT,
+            model_id=voice.TTS_MODEL_DEFAULT,
+            output_format="mp3_44100_128",
         )
 
-    def test_model_and_voice_are_overridable_from_the_environment(self):
-        _, create = self._synthesize(
-            env={"SPEECH_TTS_MODEL": "other-model", "SPEECH_TTS_VOICE": "em_alex"}
+    def test_voice_and_model_are_overridable_from_the_environment(self):
+        _, convert = self._synthesize(
+            env={"ELEVENLABS_VOICE_ID": "custom-voice", "ELEVENLABS_TTS_MODEL": "eleven_multilingual_v2"}
         )
-        self.assertEqual(create.call_args.kwargs["model"], "other-model")
-        self.assertEqual(create.call_args.kwargs["voice"], "em_alex")
+        self.assertEqual(convert.call_args.kwargs["voice_id"], "custom-voice")
+        self.assertEqual(convert.call_args.kwargs["model_id"], "eleven_multilingual_v2")
 
 
 class SpeakableTests(unittest.TestCase):
